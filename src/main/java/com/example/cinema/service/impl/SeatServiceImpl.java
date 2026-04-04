@@ -44,19 +44,6 @@ public class SeatServiceImpl implements SeatService {
 
     @Override
     @Transactional
-    public Seat updateSeat(Long id, SeatRequest request) {
-        Seat seat = seatRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy ghế với ID: " + id));
-        
-        Room room = roomRepository.findById(request.getRoomId())
-                .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
-
-        mapRequestToEntity(request, seat, room);
-        return seatRepository.save(seat);
-    }
-
-    @Override
-    @Transactional
     public List<Seat> generateSeatsForRoom(Long roomId, int numRows, int seatsPerRow) {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
@@ -68,10 +55,19 @@ public class SeatServiceImpl implements SeatService {
             for (int j = 1; j <= seatsPerRow; j++) {
                 Seat seat = new Seat();
                 seat.setRoom(room);
-                seat.setSeatRow(String.valueOf(rowLabel));
-                seat.setSeatNumber(String.format("%02d", j)); // Ví dụ: 01, 02...
                 
-                // Quy tắc: 2 hàng đầu (A, B) là ghế thường, còn lại là VIP
+                String r = String.valueOf(rowLabel);
+                String n = String.valueOf(j); // Hoặc String.format("%02d", j) nếu muốn A01
+                
+                seat.setSeatRow(r);
+                seat.setSeatNumber(n);
+                
+                // GIẢI QUYẾT LỖI NULL: Tự tạo tên ghế (Ví dụ: A1, B10)
+                seat.setName(r + n); 
+                
+                seat.setStatus("AVAILABLE");
+
+                // Logic phân loại ghế: A, B là thường, còn lại là VIP
                 if (rowLabel <= 'B') {
                     seat.setSeatType("NORMAL");
                     seat.setPrice(80000.0);
@@ -81,25 +77,39 @@ public class SeatServiceImpl implements SeatService {
                 }
                 seats.add(seat);
             }
-            rowLabel++; // Chuyển từ A -> B, B -> C...
+            rowLabel++;
         }
         return seatRepository.saveAll(seats);
     }
 
     @Override
     @Transactional
+    public Seat updateSeat(Long id, SeatRequest request) {
+        Seat seat = seatRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy ghế"));
+        Room room = roomRepository.findById(request.getRoomId())
+                .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
+
+        mapRequestToEntity(request, seat, room);
+        if (request.getStatus() != null) seat.setStatus(request.getStatus());
+        
+        return seatRepository.save(seat);
+    }
+
+    @Override
+    @Transactional
     public void deleteSeat(Long id) {
-        if (!seatRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Không tìm thấy ghế để xóa");
-        }
         seatRepository.deleteById(id);
     }
 
     private void mapRequestToEntity(SeatRequest request, Seat seat, Room room) {
         seat.setSeatRow(request.getSeatRow());
         seat.setSeatNumber(request.getSeatNumber());
+        // Tự gán name dựa trên hàng và số
+        seat.setName(request.getSeatRow() + request.getSeatNumber());
         seat.setSeatType(request.getSeatType());
         seat.setPrice(request.getPrice());
         seat.setRoom(room);
+        if (seat.getStatus() == null) seat.setStatus("AVAILABLE");
     }
 }

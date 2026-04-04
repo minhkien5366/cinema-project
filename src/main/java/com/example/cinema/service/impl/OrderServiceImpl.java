@@ -23,91 +23,97 @@ public class OrderServiceImpl implements OrderService {
     private final UserRepository userRepository;
     private final SeatRepository seatRepository;
     private final ComboRepository comboRepository;
-    private final ShowtimeRepository showtimeRepository; // Cần bổ sung thêm Repository này
-    private final TicketRepository ticketRepository;     // Cần bổ sung để lưu vết vé đã đặt
+    private final ShowtimeRepository showtimeRepository; 
+    private final TicketRepository ticketRepository;     
 
     @Override
     @Transactional
     public Order createOrder(OrderRequest request) {
-        // 1. Lấy thông tin người dùng đang đăng nhập
+        // 1. KIỂM TRA ĐẦU VÀO (Chống lỗi null ID mà Ngọc Trần đang gặp)
+        if (request.getShowtimeId() == null) {
+            throw new IllegalArgumentException("Mã suất chiếu (showtimeId) không được để trống!");
+        }
+
+        // 2. Lấy thông tin người dùng đang đăng nhập từ Token
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("User không tồn tại"));
+                .orElseThrow(() -> new ResourceNotFoundException("Phiên đăng nhập hết hạn hoặc người dùng không tồn tại"));
 
-        // 2. Kiểm tra Suất chiếu có tồn tại không
+        // 3. Kiểm tra Suất chiếu
         Showtime showtime = showtimeRepository.findById(request.getShowtimeId())
-                .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
+                .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại với ID: " + request.getShowtimeId()));
 
-        // 3. Tạo đơn hàng (Order)
+        // 4. Khởi tạo đơn hàng (Order)
         Order order = new Order();
         order.setUser(user);
-        order.setStatus("PAID"); // Hoặc "PENDING" tùy quy trình thanh toán của bạn
+        order.setStatus("PENDING"); // Để là PENDING, khi nào khách chuyển khoản xong Admin mới xác nhận thành PAID
         order.setCreatedAt(LocalDateTime.now());
+        order.setPaymentMethod(request.getPaymentMethod());
         
-        // Lưu nháp để lấy ID
-        order = orderRepository.save(order);
+        // Lưu tạm để lấy ID cho các bước sau
+        Order savedOrder = orderRepository.save(order);
 
-        double totalAmount = 0.0;
+        double calculatedTotal = 0.0;
         List<OrderDetail> details = new ArrayList<>();
 
-        // 4. Xử lý VÉ XEM PHIM (TICKET)
-        if (request.getSeatIds() != null) {
+        // 5. Xử lý VÉ XEM PHIM (TICKET)
+        if (request.getSeatIds() != null && !request.getSeatIds().isEmpty()) {
             for (Long seatId : request.getSeatIds()) {
                 Seat seat = seatRepository.findById(seatId)
-                        .orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
+                        .orElseThrow(() -> new ResourceNotFoundException("Ghế với ID " + seatId + " không tồn tại"));
 
-                // --- KIỂM TRA TRÙNG GHẾ: Rất quan trọng ---
+                // KIỂM TRA TRÙNG GHẾ: Đảm bảo ghế chưa bị ai đặt trong suất chiếu này
                 boolean isTaken = ticketRepository.existsBySeatAndShowtime(seat, showtime);
                 if (isTaken) {
-                    throw new RuntimeException("Ghế " + seat.getName() + " đã được đặt rồi!");
+                    throw new RuntimeException("Ghế " + seat.getName() + " đã có người nhanh tay đặt trước rồi!");
                 }
 
-                // Lưu vào Ticket (để đánh dấu ghế đã có người ngồi trong Suất chiếu này)
+                // Lưu vào bảng Ticket (Đánh dấu trạng thái giữ chỗ tạm thời)
                 Ticket ticket = new Ticket();
                 ticket.setUser(user);
                 ticket.setSeat(seat);
                 ticket.setShowtime(showtime);
                 ticket.setPrice(seat.getPrice());
-                ticket.setStatus("PAID");
-                ticket.setBookingCode("BK" + System.currentTimeMillis() + seatId); // Tạo mã code ngẫu nhiên
+                ticket.setStatus("PENDING"); // Chờ thanh toán
+                ticket.setBookingCode("BK" + System.currentTimeMillis() + seatId);
                 ticketRepository.save(ticket);
 
-                // Tạo dòng OrderDetail tương ứng
+                // Tạo OrderDetail cho vé
                 OrderDetail detail = new OrderDetail();
-                detail.setOrder(order);
+                detail.setOrder(savedOrder);
                 detail.setItemType("TICKET");
-                detail.setItemId(seatId); // Có thể lưu ticket.getId() nếu muốn
+                detail.setItemId(seatId); 
                 detail.setQuantity(1);
                 detail.setPrice(seat.getPrice());
                 
-                totalAmount += seat.getPrice();
+                calculatedTotal += seat.getPrice();
                 details.add(detail);
             }
         }
 
-        // 5. Xử lý COMBO
+        // 6. Xử lý COMBO (Bắp nước)
         if (request.getCombos() != null) {
             for (OrderRequest.ComboOrderDTO item : request.getCombos()) {
                 Combo combo = comboRepository.findById(item.getComboId())
                         .orElseThrow(() -> new ResourceNotFoundException("Combo không tồn tại"));
                 
                 OrderDetail detail = new OrderDetail();
-                detail.setOrder(order);
+                detail.setOrder(savedOrder);
                 detail.setItemType("COMBO");
                 detail.setItemId(item.getComboId());
                 detail.setQuantity(item.getQuantity());
                 detail.setPrice(combo.getPrice());
                 
-                totalAmount += (combo.getPrice() * item.getQuantity());
+                calculatedTotal += (combo.getPrice() * item.getQuantity());
                 details.add(detail);
             }
         }
 
-        // 6. Cập nhật tổng tiền cuối cùng cho Order
-        order.setTotalAmount(totalAmount);
+        // 7. Cập nhật tổng tiền thực tế vào Order
+        savedOrder.setTotalAmount(calculatedTotal);
         orderDetailRepository.saveAll(details);
         
-        return orderRepository.save(order);
+        return orderRepository.save(savedOrder);
     }
 
     @Override
@@ -124,11 +130,11 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public List<Order> getMyOrders() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        // Tối ưu: Nên viết hàm findByUserEmail trong OrderRepository
-        // Hiện tại dùng tạm cách này để lọc:
+        // Giả sử bạn đã có phương thức findByUserEmail trong OrderRepository
+        // Nếu chưa có hãy dùng lọc Java Stream:
         return orderRepository.findAll().stream()
                 .filter(o -> o.getUser().getEmail().equals(email))
-                .sorted((o1, o2) -> o2.getCreatedAt().compareTo(o1.getCreatedAt())) // Hiện đơn mới nhất lên đầu
+                .sorted((o1, o2) -> o2.getCreatedAt().compareTo(o1.getCreatedAt()))
                 .toList();
     }
 }

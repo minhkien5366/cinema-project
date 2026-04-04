@@ -5,11 +5,11 @@ import java.util.List;
 
 @Data
 public class OrderRequest {
-    private Long showtimeId; // BẮT BUỘC: Thêm dòng này để hết lỗi getShowtimeId()
-    private List<Long> seatIds;
-    private List<ComboOrderDTO> combos;
-    private Double totalAmount;   // Nên có để lưu vết số tiền khách thấy lúc đặt
-    private String paymentMethod; // Ví dụ: "CASH", "VNPAY"
+    private Long showtimeId;      // ID của suất chiếu
+    private List<Long> seatIds;   // Danh sách ID ghế chọn
+    private List<ComboOrderDTO> combos; 
+    private Double totalAmount;   // Tổng tiền gửi từ FE
+    private String paymentMethod; // "MOMO", "VNPAY", hoặc "CASH"
 
     @Data
     public static class ComboOrderDTO {
