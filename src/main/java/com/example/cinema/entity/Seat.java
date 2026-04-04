@@ -13,9 +13,12 @@ public class Seat {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    
+    private String name; // BỔ SUNG: Thêm trường này (ví dụ: A1, A2) để hết lỗi getName()
+    
     private String seatRow;
     private String seatNumber;
-    private String seatType;
+    private String seatType; // Thường là "NORMAL" hoặc "VIP"
     private Double price;
 
     @ManyToOne

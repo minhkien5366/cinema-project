@@ -5,10 +5,12 @@ import java.util.List;
 
 @Data
 public class OrderRequest {
-    private List<Long> seatIds; // Danh sách ID ghế
-    private List<ComboOrderDTO> combos; // Danh sách combo bắp nước
+    private Long showtimeId; // BẮT BUỘC: Thêm dòng này để hết lỗi getShowtimeId()
+    private List<Long> seatIds;
+    private List<ComboOrderDTO> combos;
+    private Double totalAmount;   // Nên có để lưu vết số tiền khách thấy lúc đặt
+    private String paymentMethod; // Ví dụ: "CASH", "VNPAY"
 
-    // Lớp này chỉ dùng để hứng dữ liệu Postman, KHÔNG PHẢI LÀ BẢNG TRONG DB
     @Data
     public static class ComboOrderDTO {
         private Long comboId;

@@ -6,7 +6,13 @@ import java.util.List;
 
 public interface CinemaService {
     List<Cinema> getAllCinemas();
+    
+    // Bổ sung hàm lấy chi tiết cụm rạp
+    Cinema getCinemaById(Long id);
+
     Cinema createCinema(CinemaRequest request);
+    
     Cinema updateCinema(Long id, CinemaRequest request);
+    
     void deleteCinema(Long id);
 }

@@ -26,6 +26,12 @@ public class ShowtimeServiceImpl implements ShowtimeService {
     public List<Showtime> getAll() { return showtimeRepository.findAll(); }
 
     @Override
+    public Showtime getById(Long id) {
+        return showtimeRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
+    }
+
+    @Override
     public List<Showtime> getByMovie(Long movieId) { return showtimeRepository.findByMovieId(movieId); }
 
     @Override
@@ -41,11 +47,10 @@ public class ShowtimeServiceImpl implements ShowtimeService {
         Room room = roomRepository.findById(request.getRoomId())
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
 
-        // 1. Tự động tính endTime = startTime + thời lượng phim + 15 phút dọn phòng
         LocalDateTime endTime = request.getStartTime().plusMinutes(movie.getDuration() + 15);
 
-        // 2. Kiểm tra trùng lịch (Overlap check)
-        checkShowtimeOverlap(room.getId(), request.getStartTime(), endTime);
+        // Kiểm tra trùng lịch tại phòng này
+        checkShowtimeOverlap(room.getId(), request.getStartTime(), endTime, null);
 
         Showtime showtime = new Showtime();
         showtime.setStartTime(request.getStartTime());
@@ -63,23 +68,29 @@ public class ShowtimeServiceImpl implements ShowtimeService {
         Showtime showtime = showtimeRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
         
-        Movie movie = movieRepository.findById(request.getMovieId()).orElseThrow(() -> new ResourceNotFoundException("Phim không tồn tại"));
+        Movie movie = movieRepository.findById(request.getMovieId())
+                .orElseThrow(() -> new ResourceNotFoundException("Phim không tồn tại"));
+        Room room = roomRepository.findById(request.getRoomId())
+                .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
+        CinemaItem cinemaItem = cinemaItemRepository.findById(request.getCinemaItemId())
+                .orElseThrow(() -> new ResourceNotFoundException("Chi nhánh không tồn tại"));
+
         LocalDateTime endTime = request.getStartTime().plusMinutes(movie.getDuration() + 15);
         
-        // Kiểm tra trùng lịch nhưng loại trừ chính ID hiện tại
-        checkShowtimeOverlapUpdate(request.getRoomId(), request.getStartTime(), endTime, id);
+        // Kiểm tra trùng lịch, loại trừ suất chiếu đang sửa (id)
+        checkShowtimeOverlap(room.getId(), request.getStartTime(), endTime, id);
 
         showtime.setStartTime(request.getStartTime());
         showtime.setEndTime(endTime);
         showtime.setMovie(movie);
-        showtime.setRoom(roomRepository.findById(request.getRoomId()).get());
+        showtime.setRoom(room);
+        showtime.setCinemaItem(cinemaItem);
         
         return showtimeRepository.save(showtime);
     }
 
     @Override
     public List<Showtime> getByMovieAndDate(Long movieId, String dateStr) {
-        // Chuyển chuỗi "2026-03-20" thành đối tượng LocalDate
         LocalDate date = LocalDate.parse(dateStr); 
         return showtimeRepository.findByMovieIdAndDate(movieId, date);
     }
@@ -87,28 +98,21 @@ public class ShowtimeServiceImpl implements ShowtimeService {
     @Override
     @Transactional
     public void deleteShowtime(Long id) {
+        if(!showtimeRepository.existsById(id)) throw new ResourceNotFoundException("Không tìm thấy để xóa");
         showtimeRepository.deleteById(id);
     }
 
-    // Logic kiểm tra trùng lịch chiếu tại cùng 1 phòng
-    private void checkShowtimeOverlap(Long roomId, LocalDateTime start, LocalDateTime end) {
-        List<Showtime> existing = showtimeRepository.findAll(); // Có thể tối ưu bằng câu Query trong Repository
+    // Gộp 2 hàm check overlap thành 1 cho gọn
+    private void checkShowtimeOverlap(Long roomId, LocalDateTime start, LocalDateTime end, Long excludeId) {
+        // Tối ưu: Chỉ lấy lịch chiếu của đúng phòng đó để kiểm tra
+        List<Showtime> existing = showtimeRepository.findByRoomId(roomId); 
         for (Showtime s : existing) {
-            if (s.getRoom().getId().equals(roomId)) {
-                if (start.isBefore(s.getEndTime()) && end.isAfter(s.getStartTime())) {
-                    throw new RuntimeException("Phòng này đã có lịch chiếu khác trong khoảng thời gian này!");
-                }
-            }
-        }
-    }
+            // Nếu đang update, bỏ qua chính nó
+            if (excludeId != null && s.getId().equals(excludeId)) continue;
 
-    private void checkShowtimeOverlapUpdate(Long roomId, LocalDateTime start, LocalDateTime end, Long id) {
-        List<Showtime> existing = showtimeRepository.findAll();
-        for (Showtime s : existing) {
-            if (!s.getId().equals(id) && s.getRoom().getId().equals(roomId)) {
-                if (start.isBefore(s.getEndTime()) && end.isAfter(s.getStartTime())) {
-                    throw new RuntimeException("Trùng lịch chiếu!");
-                }
+            if (start.isBefore(s.getEndTime()) && end.isAfter(s.getStartTime())) {
+                throw new RuntimeException("Lịch chiếu bị trùng! Phòng này đang có phim chiếu từ " 
+                        + s.getStartTime().toLocalTime() + " đến " + s.getEndTime().toLocalTime());
             }
         }
     }

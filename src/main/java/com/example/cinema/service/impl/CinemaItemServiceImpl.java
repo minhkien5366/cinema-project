@@ -19,13 +19,26 @@ public class CinemaItemServiceImpl implements CinemaItemService {
     private final CinemaRepository cinemaRepository;
 
     @Override
-    public List<CinemaItem> getAllItems() { return itemRepository.findAll(); }
+    public List<CinemaItem> getAllItems() { 
+        return itemRepository.findAll(); 
+    }
 
     @Override
-    public List<CinemaItem> getByCity(String city) { return itemRepository.findByCity(city); }
+    public List<CinemaItem> getByCity(String city) { 
+        return itemRepository.findByCity(city); 
+    }
 
     @Override
-    public List<CinemaItem> getByCinema(Long cinemaId) { return itemRepository.findByCinemaId(cinemaId); }
+    public List<CinemaItem> getByCinema(Long cinemaId) { 
+        return itemRepository.findByCinemaId(cinemaId); 
+    }
+
+    // Triển khai hàm lấy chi tiết theo ID
+    @Override
+    public CinemaItem getItemById(Long id) {
+        return itemRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Chi nhánh rạp không tồn tại với id: " + id));
+    }
 
     @Override
     @Transactional
@@ -43,8 +56,9 @@ public class CinemaItemServiceImpl implements CinemaItemService {
     public CinemaItem updateItem(Long id, CinemaItemRequest request) {
         CinemaItem item = itemRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Chi nhánh không tồn tại"));
+        
         Cinema cinema = cinemaRepository.findById(request.getCinemaId())
-                .orElseThrow(() -> new ResourceNotFoundException("C cụm rạp không tồn tại"));
+                .orElseThrow(() -> new ResourceNotFoundException("Cụm rạp không tồn tại"));
         
         mapRequestToEntity(request, item, cinema);
         return itemRepository.save(item);
@@ -52,7 +66,12 @@ public class CinemaItemServiceImpl implements CinemaItemService {
 
     @Override
     @Transactional
-    public void deleteItem(Long id) { itemRepository.deleteById(id); }
+    public void deleteItem(Long id) { 
+        if (!itemRepository.existsById(id)) {
+            throw new ResourceNotFoundException("Không tìm thấy chi nhánh để xóa");
+        }
+        itemRepository.deleteById(id); 
+    }
 
     private void mapRequestToEntity(CinemaItemRequest request, CinemaItem item, Cinema cinema) {
         item.setName(request.getName());

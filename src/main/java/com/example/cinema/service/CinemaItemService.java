@@ -8,6 +8,10 @@ public interface CinemaItemService {
     List<CinemaItem> getAllItems();
     List<CinemaItem> getByCity(String city);
     List<CinemaItem> getByCinema(Long cinemaId);
+    
+    // Hàm mới bổ sung
+    CinemaItem getItemById(Long id);
+
     CinemaItem createItem(CinemaItemRequest request);
     CinemaItem updateItem(Long id, CinemaItemRequest request);
     void deleteItem(Long id);
