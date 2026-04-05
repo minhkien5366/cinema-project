@@ -32,4 +32,5 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
 
     // 7. Kiểm tra nâng cao: Ghế đã bị chiếm bởi các vé có trạng thái 'PAID' hoặc 'PENDING' chưa
     boolean existsBySeatAndShowtimeAndStatusIn(Seat seat, Showtime showtime, List<String> statuses);
+    List<Seat> getSeatsByShowtime(Long showtimeId); // Hàm mới
 }

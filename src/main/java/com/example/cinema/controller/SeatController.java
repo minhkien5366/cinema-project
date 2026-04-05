@@ -18,8 +18,24 @@ public class SeatController {
 
     private final SeatService seatService;
 
+    /**
+     * Lấy trạng thái ghế dựa trên Suất chiếu (Dành cho khách hàng đặt vé)
+     * Logic: Ghế nào đã có vé trong Suất chiếu này sẽ trả về status = 'OCCUPIED'
+     */
+    @GetMapping("/showtime/{showtimeId}")
+    public ResponseEntity<ApiResponse<List<Seat>>> getSeatsByShowtime(@PathVariable Long showtimeId) {
+        return ResponseEntity.ok(ApiResponse.<List<Seat>>builder()
+                .status(200)
+                .message("Lấy trạng thái ghế theo suất chiếu thành công")
+                .data(seatService.getSeatsByShowtime(showtimeId))
+                .build());
+    }
+
+    /**
+     * Lấy tất cả ghế (Dành cho Admin)
+     */
     @GetMapping
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<List<Seat>>> getAllSeats() {
         return ResponseEntity.ok(ApiResponse.<List<Seat>>builder()
                 .status(200)
@@ -28,6 +44,9 @@ public class SeatController {
                 .build());
     }
 
+    /**
+     * Lấy danh sách ghế của một phòng chiếu cụ thể
+     */
     @GetMapping("/room/{roomId}")
     public ResponseEntity<ApiResponse<List<Seat>>> getSeatsByRoom(@PathVariable Long roomId) {
         return ResponseEntity.ok(ApiResponse.<List<Seat>>builder()
@@ -37,8 +56,11 @@ public class SeatController {
                 .build());
     }
 
+    /**
+     * Tạo một ghế mới lẻ
+     */
     @PostMapping
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Seat>> createSeat(@RequestBody SeatRequest request) {
         return ResponseEntity.ok(ApiResponse.<Seat>builder()
                 .status(201)
@@ -47,9 +69,11 @@ public class SeatController {
                 .build());
     }
 
-    // Endpoint mới để sinh ghế hàng loạt
+    /**
+     * Sinh danh sách ghế tự động cho phòng chiếu
+     */
     @PostMapping("/generate")
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<List<Seat>>> generateSeats(
             @RequestParam Long roomId,
             @RequestParam int rows,
@@ -61,8 +85,11 @@ public class SeatController {
                 .build());
     }
 
+    /**
+     * Cập nhật thông tin ghế
+     */
     @PutMapping("/{id}")
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Seat>> updateSeat(@PathVariable Long id, @RequestBody SeatRequest request) {
         return ResponseEntity.ok(ApiResponse.<Seat>builder()
                 .status(200)
@@ -71,8 +98,11 @@ public class SeatController {
                 .build());
     }
 
+    /**
+     * Xóa ghế
+     */
     @DeleteMapping("/{id}")
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<String>> deleteSeat(@PathVariable Long id) {
         seatService.deleteSeat(id);
         return ResponseEntity.ok(ApiResponse.<String>builder()

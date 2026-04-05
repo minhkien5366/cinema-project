@@ -19,8 +19,12 @@ public class OrderController {
     private final OrderService orderService;
 
     @PostMapping
-    @PreAuthorize("isAuthenticated()") // Bất kỳ ai login rồi đều được đặt hàng
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Order>> createOrder(@RequestBody OrderRequest request) {
+        // --- DÒNG KIỂM TRA QUAN TRỌNG ---
+        // Ngọc Trần hãy nhấn nút Thanh toán rồi nhìn vào tab Console trong IntelliJ nhé.
+        System.out.println("DEBUG - Dữ liệu JSON nhận được tại Controller: " + request);
+
         return ResponseEntity.ok(ApiResponse.<Order>builder()
                 .status(201)
                 .message("Đặt vé thành công!")
@@ -39,7 +43,7 @@ public class OrderController {
     }
 
     @GetMapping
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<List<Order>>> getAllOrders() {
         return ResponseEntity.ok(ApiResponse.<List<Order>>builder()
                 .status(200)
