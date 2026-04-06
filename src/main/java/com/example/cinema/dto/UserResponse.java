@@ -21,5 +21,6 @@ public class UserResponse {
     private String avatar;
     private String gender;       // THÊM DÒNG NÀY
     private LocalDate dateOfBirth; // THÊM DÒNG NÀY
+    private Long managedCinemaItemId; // Thêm trường này
     private Set<String> roles;
 }

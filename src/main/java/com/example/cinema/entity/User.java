@@ -28,6 +28,9 @@ public class User {
     private String mobileNumber;
     private LocalDate dateOfBirth;
 
+    // --- TRƯỜNG NÂNG CAO CHO SUPER ADMIN ---
+    private Long managedCinemaItemId; 
+
     @CreationTimestamp
     private LocalDateTime createdAt;
     @UpdateTimestamp

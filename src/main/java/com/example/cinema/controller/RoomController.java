@@ -14,22 +14,22 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/rooms")
 @RequiredArgsConstructor
-public class RoomController {
+public class RoomController { // Đã sửa từ OrderController thành RoomController
 
     private final RoomService roomService;
 
-    // Lấy tất cả phòng chiếu (Dùng cho Admin)
+    // Tự động lọc phòng theo quyền (Super Admin thấy hết, Admin thấy rạp mình)
     @GetMapping
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<List<Room>>> getAllRooms() {
         return ResponseEntity.ok(ApiResponse.<List<Room>>builder()
                 .status(200)
-                .message("Lấy danh sách phòng thành công")
+                .message("Lấy danh sách phòng theo quyền hạn thành công")
                 .data(roomService.getAllRooms())
                 .build());
     }
 
-    // Lấy danh sách phòng theo chi nhánh rạp
+    // Endpoint dành cho người dùng xem phòng theo rạp (Ví dụ khi chọn suất chiếu)
     @GetMapping("/cinema-item/{cinemaItemId}")
     public ResponseEntity<ApiResponse<List<Room>>> getRoomsByCinemaItem(@PathVariable Long cinemaItemId) {
         return ResponseEntity.ok(ApiResponse.<List<Room>>builder()
@@ -40,7 +40,7 @@ public class RoomController {
     }
 
     @PostMapping
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Room>> createRoom(@RequestBody RoomRequest request) {
         return ResponseEntity.ok(ApiResponse.<Room>builder()
                 .status(201)
@@ -50,7 +50,7 @@ public class RoomController {
     }
 
     @PutMapping("/{id}")
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Room>> updateRoom(@PathVariable Long id, @RequestBody RoomRequest request) {
         return ResponseEntity.ok(ApiResponse.<Room>builder()
                 .status(200)
@@ -60,7 +60,7 @@ public class RoomController {
     }
 
     @DeleteMapping("/{id}")
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<String>> deleteRoom(@PathVariable Long id) {
         roomService.deleteRoom(id);
         return ResponseEntity.ok(ApiResponse.<String>builder()
