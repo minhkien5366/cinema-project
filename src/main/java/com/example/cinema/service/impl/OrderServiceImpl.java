@@ -1,6 +1,6 @@
 package com.example.cinema.service.impl;
 
-import com.example.cinema.dto.OrderRequest;
+import com.example.cinema.dto.*;
 import com.example.cinema.entity.*;
 import com.example.cinema.exception.ResourceNotFoundException;
 import com.example.cinema.repository.*;
@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -28,57 +29,46 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
-    public Order createOrder(OrderRequest request) {
-        // 1. KIỂM TRA ĐẦU VÀO (Chống lỗi null ID mà Ngọc Trần đang gặp)
+    public OrderResponse createOrder(OrderRequest request) {
         if (request.getShowtimeId() == null) {
             throw new IllegalArgumentException("Mã suất chiếu (showtimeId) không được để trống!");
         }
 
-        // 2. Lấy thông tin người dùng đang đăng nhập từ Token
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("Phiên đăng nhập hết hạn hoặc người dùng không tồn tại"));
+                .orElseThrow(() -> new ResourceNotFoundException("Phiên đăng nhập hết hạn"));
 
-        // 3. Kiểm tra Suất chiếu
         Showtime showtime = showtimeRepository.findById(request.getShowtimeId())
-                .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại với ID: " + request.getShowtimeId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
 
-        // 4. Khởi tạo đơn hàng (Order)
         Order order = new Order();
         order.setUser(user);
-        order.setStatus("PENDING"); // Để là PENDING, khi nào khách chuyển khoản xong Admin mới xác nhận thành PAID
+        order.setStatus("PENDING");
         order.setCreatedAt(LocalDateTime.now());
         order.setPaymentMethod(request.getPaymentMethod());
         
-        // Lưu tạm để lấy ID cho các bước sau
         Order savedOrder = orderRepository.save(order);
-
         double calculatedTotal = 0.0;
         List<OrderDetail> details = new ArrayList<>();
 
-        // 5. Xử lý VÉ XEM PHIM (TICKET)
         if (request.getSeatIds() != null && !request.getSeatIds().isEmpty()) {
             for (Long seatId : request.getSeatIds()) {
                 Seat seat = seatRepository.findById(seatId)
-                        .orElseThrow(() -> new ResourceNotFoundException("Ghế với ID " + seatId + " không tồn tại"));
+                        .orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
 
-                // KIỂM TRA TRÙNG GHẾ: Đảm bảo ghế chưa bị ai đặt trong suất chiếu này
-                boolean isTaken = ticketRepository.existsBySeatAndShowtime(seat, showtime);
-                if (isTaken) {
-                    throw new RuntimeException("Ghế " + seat.getName() + " đã có người nhanh tay đặt trước rồi!");
+                if (ticketRepository.existsBySeatAndShowtime(seat, showtime)) {
+                    throw new RuntimeException("Ghế " + seat.getName() + " đã bị người khác đặt!");
                 }
 
-                // Lưu vào bảng Ticket (Đánh dấu trạng thái giữ chỗ tạm thời)
                 Ticket ticket = new Ticket();
                 ticket.setUser(user);
                 ticket.setSeat(seat);
                 ticket.setShowtime(showtime);
                 ticket.setPrice(seat.getPrice());
-                ticket.setStatus("PENDING"); // Chờ thanh toán
+                ticket.setStatus("PENDING");
                 ticket.setBookingCode("BK" + System.currentTimeMillis() + seatId);
                 ticketRepository.save(ticket);
 
-                // Tạo OrderDetail cho vé
                 OrderDetail detail = new OrderDetail();
                 detail.setOrder(savedOrder);
                 detail.setItemType("TICKET");
@@ -91,7 +81,6 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        // 6. Xử lý COMBO (Bắp nước)
         if (request.getCombos() != null) {
             for (OrderRequest.ComboOrderDTO item : request.getCombos()) {
                 Combo combo = comboRepository.findById(item.getComboId())
@@ -109,32 +98,86 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        // 7. Cập nhật tổng tiền thực tế vào Order
         savedOrder.setTotalAmount(calculatedTotal);
         orderDetailRepository.saveAll(details);
+        savedOrder.setOrderDetails(details);
         
-        return orderRepository.save(savedOrder);
+        return mapToResponse(orderRepository.save(savedOrder));
     }
 
     @Override
-    public Order getOrderById(Long id) {
-        return orderRepository.findById(id)
+    @Transactional
+    public OrderResponse updateOrderStatus(Long orderId, String newStatus) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng id: " + orderId));
+
+        String upperStatus = newStatus.toUpperCase();
+        order.setStatus(upperStatus);
+
+        if (order.getOrderDetails() != null) {
+            for (OrderDetail detail : order.getOrderDetails()) {
+                if ("TICKET".equals(detail.getItemType())) {
+                    List<Ticket> tickets = ticketRepository.findByUserUserId(order.getUser().getUserId());
+                    
+                    tickets.stream()
+                        // FIX TẠI ĐÂY: Dùng getId() thay vì getSeatId()
+                        .filter(t -> t.getSeat().getId().equals(detail.getItemId()) 
+                                  && ("PENDING".equals(t.getStatus()) || "BOOKED".equals(t.getStatus())))
+                        .findFirst()
+                        .ifPresent(t -> {
+                            t.setStatus(upperStatus);
+                            ticketRepository.save(t);
+                        });
+                }
+            }
+        }
+
+        return mapToResponse(orderRepository.save(order));
+    }
+
+    @Override
+    public OrderResponse getOrderById(Long id) {
+        Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không thấy đơn hàng id: " + id));
+        return mapToResponse(order);
     }
 
     @Override
-    public List<Order> getAllOrders() {
-        return orderRepository.findAll();
+    public List<OrderResponse> getAllOrders() {
+        return orderRepository.findAll().stream()
+                .sorted((o1, o2) -> o2.getCreatedAt().compareTo(o1.getCreatedAt()))
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
     }
 
     @Override
-    public List<Order> getMyOrders() {
+    public List<OrderResponse> getMyOrders() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        // Giả sử bạn đã có phương thức findByUserEmail trong OrderRepository
-        // Nếu chưa có hãy dùng lọc Java Stream:
         return orderRepository.findAll().stream()
                 .filter(o -> o.getUser().getEmail().equals(email))
                 .sorted((o1, o2) -> o2.getCreatedAt().compareTo(o1.getCreatedAt()))
-                .toList();
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    private OrderResponse mapToResponse(Order order) {
+        List<OrderDetailResponse> details = order.getOrderDetails().stream()
+                .map(d -> OrderDetailResponse.builder()
+                        .id(d.getId())
+                        .itemId(d.getItemId())
+                        .itemType(d.getItemType())
+                        .quantity(d.getQuantity())
+                        .price(d.getPrice())
+                        .build())
+                .collect(Collectors.toList());
+
+        return OrderResponse.builder()
+                .id(order.getId())
+                .status(order.getStatus())
+                .totalAmount(order.getTotalAmount())
+                .paymentMethod(order.getPaymentMethod())
+                .createdAt(order.getCreatedAt())
+                .orderDetails(details)
+                .build();
     }
 }

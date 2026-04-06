@@ -8,7 +8,7 @@ public interface TicketService {
     Ticket createTicket(TicketRequest request);
     List<Ticket> getMyTickets();
     Ticket getByBookingCode(String code);
-    List<Ticket> getTicketsByShowtime(Long showtimeId); // Thêm để làm sơ đồ ghế
-    List<Ticket> getAllTickets(); // Cho Admin quản lý
+    List<Ticket> getTicketsByShowtime(Long showtimeId);
+    List<Ticket> getAllTickets();
     void cancelTicket(Long ticketId);
 }

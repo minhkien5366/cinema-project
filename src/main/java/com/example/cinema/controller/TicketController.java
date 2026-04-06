@@ -46,4 +46,36 @@ public class TicketController {
                 .data(ticketService.getByBookingCode(code))
                 .build());
     }
+
+    // --- API DÀNH CHO ADMIN ---
+
+    @GetMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<List<Ticket>>> getAllTickets() {
+        return ResponseEntity.ok(ApiResponse.<List<Ticket>>builder()
+                .status(200)
+                .message("Admin lấy toàn bộ danh sách vé thành công")
+                .data(ticketService.getAllTickets())
+                .build());
+    }
+
+    @GetMapping("/showtime/{showtimeId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<List<Ticket>>> getTicketsByShowtime(@PathVariable Long showtimeId) {
+        return ResponseEntity.ok(ApiResponse.<List<Ticket>>builder()
+                .status(200)
+                .message("Lấy danh sách vé theo suất chiếu thành công")
+                .data(ticketService.getTicketsByShowtime(showtimeId))
+                .build());
+    }
+
+    @PutMapping("/{id}/cancel")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> cancelTicket(@PathVariable Long id) {
+        ticketService.cancelTicket(id);
+        return ResponseEntity.ok(ApiResponse.<Void>builder()
+                .status(200)
+                .message("Đã hủy vé thành công")
+                .build());
+    }
 }

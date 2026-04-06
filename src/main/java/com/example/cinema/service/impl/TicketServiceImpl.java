@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Sort;
 
 import java.util.Arrays;
 import java.util.List;
@@ -26,24 +27,21 @@ public class TicketServiceImpl implements TicketService {
     @Override
     @Transactional
     public Ticket createTicket(TicketRequest request) {
-        // 1. Lấy thông tin thực thể trước
         Seat seat = seatRepository.findById(request.getSeatId())
                 .orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
         Showtime showtime = showtimeRepository.findById(request.getShowtimeId())
                 .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
         
-        // 2. Kiểm tra ghế đã bị chiếm chưa (Bao gồm cả trạng thái BOOKED và PAID)
-        // Mình dùng danh sách trạng thái để kiểm tra cho chắc chắn
-        List<String> busyStatuses = Arrays.asList("BOOKED", "PAID");
+        // Kiểm tra ghế đã bị chiếm chưa (Tránh đặt trùng)
+        List<String> busyStatuses = Arrays.asList("BOOKED", "PAID", "OCCUPIED");
         if (ticketRepository.existsBySeatAndShowtimeAndStatusIn(seat, showtime, busyStatuses)) {
-            throw new RuntimeException("Ghế " + seat.getSeatNumber() + " đã có người đặt hoặc đã thanh toán!");
+            throw new RuntimeException("Ghế " + seat.getSeatRow() + seat.getSeatNumber() + " đã có người đặt!");
         }
 
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("User không tồn tại"));
+                .orElseThrow(() -> new ResourceNotFoundException("Người dùng không tồn tại"));
 
-        // 3. Tạo vé mới
         Ticket ticket = new Ticket();
         ticket.setSeat(seat);
         ticket.setShowtime(showtime);
@@ -51,7 +49,7 @@ public class TicketServiceImpl implements TicketService {
         ticket.setPrice(seat.getPrice());
         ticket.setStatus("BOOKED");
         
-        // Tạo mã đặt chỗ duy nhất (8 ký tự cuối của UUID)
+        // Tạo mã booking ngẫu nhiên 8 ký tự
         String bookingCode = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
         ticket.setBookingCode(bookingCode);
 
@@ -61,17 +59,14 @@ public class TicketServiceImpl implements TicketService {
     @Override
     public List<Ticket> getMyTickets() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy thông tin cá nhân"));
-        // Sử dụng hàm tìm kiếm theo Email đã thêm ở Repository sẽ nhanh hơn
+        // Giả sử bạn đã thêm hàm findByUserEmailOrderByCreatedAtDesc trong Repository
         return ticketRepository.findByUserEmailOrderByCreatedAtDesc(email);
     }
 
     @Override
     public Ticket getByBookingCode(String code) {
-        // Cập nhật dùng Optional để tránh NullPointerException
         return ticketRepository.findByBookingCode(code)
-                .orElseThrow(() -> new ResourceNotFoundException("Mã đặt vé " + code + " không tồn tại trên hệ thống"));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy vé với mã: " + code));
     }
 
     @Override
@@ -81,18 +76,19 @@ public class TicketServiceImpl implements TicketService {
 
     @Override
     public List<Ticket> getAllTickets() {
-        return ticketRepository.findAll();
+        // Sắp xếp vé mới nhất lên đầu cho Admin dễ nhìn
+        return ticketRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"));
     }
 
     @Override
     @Transactional
     public void cancelTicket(Long ticketId) {
         Ticket ticket = ticketRepository.findById(ticketId)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy vé để hủy"));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy vé"));
         
-        // Chỉ cho phép hủy nếu vé chưa thanh toán hoặc theo chính sách rạp
+        // Logic: Không cho hủy vé đã thanh toán (tùy bạn chỉnh sửa)
         if ("PAID".equals(ticket.getStatus())) {
-            throw new RuntimeException("Vé đã thanh toán không thể tự hủy trên hệ thống!");
+            throw new RuntimeException("Vé đã thanh toán. Vui lòng liên hệ quầy để hoàn tiền.");
         }
         
         ticket.setStatus("CANCELLED");

@@ -66,6 +66,8 @@ public class UserServiceImpl implements UserService {
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
                 .mobileNumber(user.getMobileNumber())
+                .gender(user.getGender())           // BỔ SUNG DÒNG NÀY
+            .dateOfBirth(user.getDateOfBirth()) // BỔ SUNG DÒNG NÀY
                 .avatar(user.getAvatar()) // Đảm bảo trả về avatar trong response
                 .roles(user.getRoles().stream()
                         .map(role -> role.getRoleName())
