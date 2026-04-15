@@ -64,6 +64,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/combos/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/showtimes/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/menus/**").permitAll()
+                // Trong hàm securityFilterChain, Duy thêm dòng này vào trước .anyRequest().authenticated()
+                .requestMatchers("/uploads/**").permitAll()
                 
                 // 5. Mọi request khác bắt buộc Login
                 .anyRequest().authenticated()

@@ -12,8 +12,8 @@ public class OrderDetail {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    private String itemType;
-    private Long itemId;
+    private String itemType; // TICKET hoặc COMBO
+    private Long itemId;     // ID của Seat (nếu là TICKET) hoặc ID của Combo
     private Integer quantity;
     private Double price;
 

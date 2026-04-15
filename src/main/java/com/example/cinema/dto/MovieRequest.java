@@ -12,8 +12,8 @@ public class MovieRequest {
     private String cast;
     private String country;
     private String status;
-    private String posterUrl;
     private String trailerUrl;
     private LocalDate releaseDate;
-    private Integer genreId; // Dùng ID để liên kết thể loại
+    private Integer genreId; 
+    // Không để posterUrl ở đây nữa vì sẽ truyền file riêng qua Controller
 }

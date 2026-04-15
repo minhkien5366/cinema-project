@@ -7,10 +7,7 @@ import java.util.List;
 public interface SeatService {
     List<Seat> getAllSeats();
     List<Seat> getSeatsByRoom(Long roomId);
-    
-    // HÀM QUAN TRỌNG: Lấy ghế kèm trạng thái theo Suất chiếu
     List<Seat> getSeatsByShowtime(Long showtimeId); 
-
     Seat createSeat(SeatRequest request);
     List<Seat> generateSeatsForRoom(Long roomId, int rows, int seatsPerRow);
     Seat updateSeat(Long id, SeatRequest request);

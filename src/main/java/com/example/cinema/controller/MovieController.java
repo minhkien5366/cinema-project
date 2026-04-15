@@ -7,9 +7,11 @@ import com.example.cinema.entity.Movie;
 import com.example.cinema.service.MovieService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/movies")
@@ -18,6 +20,7 @@ public class MovieController {
 
     private final MovieService movieService;
 
+    // 1. Lấy danh sách phim (Public)
     @GetMapping
     public ResponseEntity<ApiResponse<Page<MovieDTO>>> getMovies(
             @RequestParam(required = false) String search,
@@ -35,6 +38,7 @@ public class MovieController {
         );
     }
 
+    // 2. Lấy chi tiết phim (Public)
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<Movie>> getMovieDetail(@PathVariable Long id) {
         Movie movie = movieService.getMovieDetail(id);
@@ -47,23 +51,32 @@ public class MovieController {
         );
     }
 
-    @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Chỉ Admin mới được thêm phim
-    public ResponseEntity<ApiResponse<Movie>> createMovie(@RequestBody MovieRequest request) {
-        Movie movie = movieService.createMovie(request);
+    // 3. Thêm phim mới kèm Upload ảnh (Admin/Super Admin)
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<Movie>> createMovie(
+            @RequestPart("movie") MovieRequest request,
+            @RequestPart(value = "file", required = false) MultipartFile file
+    ) {
+        Movie movie = movieService.createMovie(request, file);
         return ResponseEntity.ok(
                 ApiResponse.<Movie>builder()
                         .status(201)
-                        .message("Thêm phim thành công")
+                        .message("Thêm phim và upload ảnh thành công")
                         .data(movie)
                         .build()
         );
     }
 
-    @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Chỉ Admin mới được sửa phim
-    public ResponseEntity<ApiResponse<Movie>> updateMovie(@PathVariable Long id, @RequestBody MovieRequest request) {
-        Movie movie = movieService.updateMovie(id, request);
+    // 4. Cập nhật phim kèm đổi ảnh (Admin/Super Admin)
+    @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<Movie>> updateMovie(
+            @PathVariable Long id,
+            @RequestPart("movie") MovieRequest request,
+            @RequestPart(value = "file", required = false) MultipartFile file
+    ) {
+        Movie movie = movieService.updateMovie(id, request, file);
         return ResponseEntity.ok(
                 ApiResponse.<Movie>builder()
                         .status(200)
@@ -73,14 +86,15 @@ public class MovieController {
         );
     }
 
+    // 5. Xóa phim (Admin/Super Admin)
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Chỉ Admin mới được xóa phim
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<String>> deleteMovie(@PathVariable Long id) {
         movieService.deleteMovie(id);
         return ResponseEntity.ok(
                 ApiResponse.<String>builder()
                         .status(200)
-                        .message("Xóa phim thành công")
+                        .message("Xóa phim và file ảnh thành công")
                         .build()
         );
     }

@@ -1,17 +1,12 @@
 package com.example.cinema.service.impl;
 
 import com.example.cinema.dto.SeatRequest;
-import com.example.cinema.entity.Room;
-import com.example.cinema.entity.Seat;
-import com.example.cinema.entity.Showtime;
-import com.example.cinema.entity.Ticket;
+import com.example.cinema.entity.*;
 import com.example.cinema.exception.ResourceNotFoundException;
-import com.example.cinema.repository.RoomRepository;
-import com.example.cinema.repository.SeatRepository;
-import com.example.cinema.repository.ShowtimeRepository;
-import com.example.cinema.repository.TicketRepository;
+import com.example.cinema.repository.*;
 import com.example.cinema.service.SeatService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,59 +23,48 @@ public class SeatServiceImpl implements SeatService {
     private final RoomRepository roomRepository;
     private final ShowtimeRepository showtimeRepository; 
     private final TicketRepository ticketRepository;     
+    private final UserRepository userRepository;
 
     @Override
     public List<Seat> getSeatsByShowtime(Long showtimeId) {
-        // Log để Ngọc Trần kiểm tra trong Console IntelliJ
-        System.out.println(">>> [LOG] Đang truy vấn ghế cho Suất chiếu ID: " + showtimeId);
-
-        // 1. Tìm suất chiếu để xác định phòng chiếu
         Showtime showtime = showtimeRepository.findById(showtimeId)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy suất chiếu ID: " + showtimeId));
 
-        if (showtime.getRoom() == null) {
-            System.out.println(">>> [CẢNH BÁO] Suất chiếu ID " + showtimeId + " chưa được gán phòng!");
-            return new ArrayList<>();
-        }
+        if (showtime.getRoom() == null) return new ArrayList<>();
 
-        Long roomId = showtime.getRoom().getId();
-        System.out.println(">>> [LOG] Suất chiếu thuộc Phòng ID: " + roomId);
-
-        // 2. Lấy tất cả ghế nguyên bản thuộc phòng đó
-        List<Seat> allSeatsInRoom = seatRepository.findByRoomId(roomId);
-        System.out.println(">>> [LOG] Tìm thấy " + allSeatsInRoom.size() + " ghế trong CSDL cho phòng này.");
-
-        // 3. Lấy danh sách ID ghế đã có vé (Ticket) trong suất chiếu này
+        List<Seat> allSeatsInRoom = seatRepository.findByRoomId(showtime.getRoom().getId());
         List<Ticket> tickets = ticketRepository.findByShowtimeId(showtimeId);
+        
         Set<Long> occupiedSeatIds = tickets.stream()
-                .filter(t -> !"CANCELLED".equals(t.getStatus())) // Loại bỏ vé đã hủy
+                .filter(t -> !"CANCELLED".equals(t.getStatus()))
                 .map(t -> t.getSeat().getId())
                 .collect(Collectors.toSet());
 
-        // 4. Gán trạng thái OCCUPIED cho ghế đã bán (chỉ trả về Client, không lưu xuống bảng seats)
         for (Seat seat : allSeatsInRoom) {
-            if (occupiedSeatIds.contains(seat.getId())) {
-                seat.setStatus("OCCUPIED");
-            } else {
-                seat.setStatus("AVAILABLE");
-            }
+            seat.setStatus(occupiedSeatIds.contains(seat.getId()) ? "OCCUPIED" : "AVAILABLE");
         }
         return allSeatsInRoom;
     }
 
     @Override
     public List<Seat> getAllSeats() {
-        return seatRepository.findAll();
+        User user = getCurrentUser();
+        if (isSuperAdmin(user)) {
+            return seatRepository.findAll();
+        }
+        return seatRepository.findByRoom_CinemaItem_Id(user.getManagedCinemaItemId());
     }
 
     @Override
     public List<Seat> getSeatsByRoom(Long roomId) {
+        validateRoomAccess(roomId);
         return seatRepository.findByRoomId(roomId);
     }
 
     @Override
     @Transactional
     public Seat createSeat(SeatRequest request) {
+        validateRoomAccess(request.getRoomId());
         Room room = roomRepository.findById(request.getRoomId())
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
         Seat seat = new Seat();
@@ -91,8 +75,10 @@ public class SeatServiceImpl implements SeatService {
     @Override
     @Transactional
     public List<Seat> generateSeatsForRoom(Long roomId, int numRows, int seatsPerRow) {
+        validateRoomAccess(roomId);
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
+        
         List<Seat> seats = new ArrayList<>();
         char rowLabel = 'A';
         for (int i = 0; i < numRows; i++) {
@@ -101,15 +87,10 @@ public class SeatServiceImpl implements SeatService {
                 seat.setRoom(room);
                 seat.setSeatRow(String.valueOf(rowLabel));
                 seat.setSeatNumber(String.valueOf(j));
-                seat.setName(String.valueOf(rowLabel) + j); 
+                seat.setName(rowLabel + String.valueOf(j)); 
                 seat.setStatus("AVAILABLE");
-                if (rowLabel <= 'B') {
-                    seat.setSeatType("NORMAL");
-                    seat.setPrice(80000.0);
-                } else {
-                    seat.setSeatType("VIP");
-                    seat.setPrice(120000.0);
-                }
+                if (i < 2) { seat.setSeatType("NORMAL"); seat.setPrice(80000.0); }
+                else { seat.setSeatType("VIP"); seat.setPrice(120000.0); }
                 seats.add(seat);
             }
             rowLabel++;
@@ -121,6 +102,9 @@ public class SeatServiceImpl implements SeatService {
     @Transactional
     public Seat updateSeat(Long id, SeatRequest request) {
         Seat seat = seatRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy ghế"));
+        validateRoomAccess(seat.getRoom().getId());
+        validateRoomAccess(request.getRoomId());
+
         Room room = roomRepository.findById(request.getRoomId()).orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
         mapRequestToEntity(request, seat, room);
         if (request.getStatus() != null) seat.setStatus(request.getStatus());
@@ -130,7 +114,47 @@ public class SeatServiceImpl implements SeatService {
     @Override
     @Transactional
     public void deleteSeat(Long id) {
+        Seat seat = seatRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
+        validateRoomAccess(seat.getRoom().getId());
         seatRepository.deleteById(id);
+    }
+
+    // --- HELPER METHODS ---
+    private User getCurrentUser() {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userRepository.findByEmail(email).orElseThrow(() -> new ResourceNotFoundException("User không tồn tại"));
+    }
+
+    /**
+     * Fix: Chấp nhận cả "SUPER_ADMIN" và "ROLE_SUPER_ADMIN"
+     */
+    private boolean isSuperAdmin(User user) {
+        return user.getRoles().stream()
+                .anyMatch(r -> r.getRoleName().equalsIgnoreCase("SUPER_ADMIN") 
+                            || r.getRoleName().equalsIgnoreCase("ROLE_SUPER_ADMIN"));
+    }
+
+    /**
+     * Fix: Thêm kiểm tra null cho CinemaItem và ưu tiên quyền Super Admin
+     */
+    private void validateRoomAccess(Long roomId) {
+        User user = getCurrentUser();
+        
+        // Nếu là Super Admin thì được phép truy cập mọi phòng
+        if (isSuperAdmin(user)) return;
+
+        Room room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại ID: " + roomId));
+
+        // Kiểm tra xem phòng đã được gán vào Rạp chưa để tránh NullPointerException
+        if (room.getCinemaItem() == null) {
+            throw new RuntimeException("Phòng này chưa được gán vào chi nhánh rạp nào. Hãy cập nhật CinemaItem cho phòng trước!");
+        }
+
+        // Kiểm tra quyền của Admin thường
+        if (user.getManagedCinemaItemId() == null || !room.getCinemaItem().getId().equals(user.getManagedCinemaItemId())) {
+            throw new RuntimeException("Bạn không có quyền quản lý ghế tại chi nhánh rạp này!");
+        }
     }
 
     private void mapRequestToEntity(SeatRequest request, Seat seat, Room room) {

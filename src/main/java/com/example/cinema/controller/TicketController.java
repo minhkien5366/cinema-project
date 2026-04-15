@@ -39,6 +39,7 @@ public class TicketController {
     }
 
     @GetMapping("/code/{code}")
+    @PreAuthorize("isAuthenticated()") // Cần đăng nhập để check mã vé
     public ResponseEntity<ApiResponse<Ticket>> getByCode(@PathVariable String code) {
         return ResponseEntity.ok(ApiResponse.<Ticket>builder()
                 .status(200)
@@ -54,7 +55,7 @@ public class TicketController {
     public ResponseEntity<ApiResponse<List<Ticket>>> getAllTickets() {
         return ResponseEntity.ok(ApiResponse.<List<Ticket>>builder()
                 .status(200)
-                .message("Admin lấy toàn bộ danh sách vé thành công")
+                .message("Lấy danh sách vé theo quyền hạn quản lý thành công")
                 .data(ticketService.getAllTickets())
                 .build());
     }
@@ -64,7 +65,7 @@ public class TicketController {
     public ResponseEntity<ApiResponse<List<Ticket>>> getTicketsByShowtime(@PathVariable Long showtimeId) {
         return ResponseEntity.ok(ApiResponse.<List<Ticket>>builder()
                 .status(200)
-                .message("Lấy danh sách vé theo suất chiếu thành công")
+                .message("Lấy danh sách vé của suất chiếu thành công")
                 .data(ticketService.getTicketsByShowtime(showtimeId))
                 .build());
     }

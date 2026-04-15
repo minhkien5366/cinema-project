@@ -1,5 +1,6 @@
 package com.example.cinema.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -14,19 +15,18 @@ public class Seat {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    private String name;       // Ví dụ: "A1", "B5"
-    private String seatRow;    // Ví dụ: "A", "B"
-    private String seatNumber; // Ví dụ: "1", "2"
-    private String seatType;   // "NORMAL" hoặc "VIP"
+    private String name;       
+    private String seatRow;    
+    private String seatNumber; 
+    private String seatType;   
     private Double price;
     
-    // Thêm trường này để Frontend biết ghế có trống không
-    // Mặc định khi tạo ghế là "AVAILABLE"
     @Column(columnDefinition = "varchar(20) default 'AVAILABLE'")
     private String status = "AVAILABLE"; 
 
     @ManyToOne
     @JoinColumn(name = "room_id")
+    @JsonIgnoreProperties("seats") 
     private Room room;
 
     @CreationTimestamp

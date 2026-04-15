@@ -32,15 +32,12 @@ public class TicketServiceImpl implements TicketService {
         Showtime showtime = showtimeRepository.findById(request.getShowtimeId())
                 .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
         
-        // Kiểm tra ghế đã bị chiếm chưa (Tránh đặt trùng)
-        List<String> busyStatuses = Arrays.asList("BOOKED", "PAID", "OCCUPIED");
+        List<String> busyStatuses = Arrays.asList("BOOKED", "PAID");
         if (ticketRepository.existsBySeatAndShowtimeAndStatusIn(seat, showtime, busyStatuses)) {
-            throw new RuntimeException("Ghế " + seat.getSeatRow() + seat.getSeatNumber() + " đã có người đặt!");
+            throw new RuntimeException("Ghế " + seat.getName() + " đã có người đặt!");
         }
 
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("Người dùng không tồn tại"));
+        User user = getCurrentUser();
 
         Ticket ticket = new Ticket();
         ticket.setSeat(seat);
@@ -49,7 +46,6 @@ public class TicketServiceImpl implements TicketService {
         ticket.setPrice(seat.getPrice());
         ticket.setStatus("BOOKED");
         
-        // Tạo mã booking ngẫu nhiên 8 ký tự
         String bookingCode = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
         ticket.setBookingCode(bookingCode);
 
@@ -58,26 +54,41 @@ public class TicketServiceImpl implements TicketService {
 
     @Override
     public List<Ticket> getMyTickets() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        // Giả sử bạn đã thêm hàm findByUserEmailOrderByCreatedAtDesc trong Repository
-        return ticketRepository.findByUserEmailOrderByCreatedAtDesc(email);
+        return ticketRepository.findByUserEmailOrderByCreatedAtDesc(getCurrentUser().getEmail());
     }
 
     @Override
     public Ticket getByBookingCode(String code) {
-        return ticketRepository.findByBookingCode(code)
+        Ticket ticket = ticketRepository.findByBookingCode(code)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy vé với mã: " + code));
+        
+        // Nếu là Admin gọi hàm này, phải check xem vé có thuộc rạp của họ không
+        validateAdminAccess(ticket);
+        return ticket;
     }
 
     @Override
     public List<Ticket> getTicketsByShowtime(Long showtimeId) {
+        Showtime showtime = showtimeRepository.findById(showtimeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
+        
+        // Kiểm tra xem Admin có quyền quản lý rạp chứa suất chiếu này không
+        validateBranchId(showtime.getCinemaItem().getId());
+        
         return ticketRepository.findByShowtimeId(showtimeId);
     }
 
     @Override
     public List<Ticket> getAllTickets() {
-        // Sắp xếp vé mới nhất lên đầu cho Admin dễ nhìn
-        return ticketRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"));
+        User user = getCurrentUser();
+        Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
+        
+        if (isSuperAdmin(user)) {
+            return ticketRepository.findAll(sort);
+        }
+        
+        // Admin thường: Chỉ lấy vé của chi nhánh mình quản lý
+        return ticketRepository.findByShowtime_CinemaItem_Id(user.getManagedCinemaItemId(), sort);
     }
 
     @Override
@@ -86,12 +97,46 @@ public class TicketServiceImpl implements TicketService {
         Ticket ticket = ticketRepository.findById(ticketId)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy vé"));
         
-        // Logic: Không cho hủy vé đã thanh toán (tùy bạn chỉnh sửa)
+        validateAdminAccess(ticket);
+
         if ("PAID".equals(ticket.getStatus())) {
-            throw new RuntimeException("Vé đã thanh toán. Vui lòng liên hệ quầy để hoàn tiền.");
+            throw new RuntimeException("Vé đã thanh toán. Vui lòng thực hiện quy trình hoàn tiền tại quầy.");
         }
         
         ticket.setStatus("CANCELLED");
         ticketRepository.save(ticket);
+    }
+
+    // --- HELPER METHODS BẢO MẬT ---
+
+    private User getCurrentUser() {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userRepository.findByEmail(email).orElseThrow(() -> new ResourceNotFoundException("Phiên đăng nhập hết hạn"));
+    }
+
+    private boolean isSuperAdmin(User user) {
+        return user.getRoles().stream().anyMatch(r -> r.getRoleName().equals("SUPER_ADMIN"));
+    }
+
+    private void validateBranchId(Long cinemaItemId) {
+        User user = getCurrentUser();
+        if (isSuperAdmin(user)) return;
+        if (user.getManagedCinemaItemId() == null || !user.getManagedCinemaItemId().equals(cinemaItemId)) {
+            throw new RuntimeException("Bạn không có quyền quản lý vé tại chi nhánh rạp này!");
+        }
+    }
+
+    private void validateAdminAccess(Ticket ticket) {
+        User user = getCurrentUser();
+        // Super Admin thấy hết, User xem vé của chính mình, Admin xem vé rạp mình
+        if (isSuperAdmin(user)) return;
+        
+        boolean isOwner = ticket.getUser().getEmail().equals(user.getEmail());
+        boolean isBranchAdmin = user.getManagedCinemaItemId() != null 
+                && user.getManagedCinemaItemId().equals(ticket.getShowtime().getCinemaItem().getId());
+
+        if (!isOwner && !isBranchAdmin) {
+            throw new RuntimeException("Bạn không có quyền truy cập thông tin vé này!");
+        }
     }
 }

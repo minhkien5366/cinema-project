@@ -1,9 +1,6 @@
 package com.example.cinema.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -17,5 +14,7 @@ public class OrderResponse {
     private Double totalAmount;
     private String paymentMethod;
     private LocalDateTime createdAt;
+    private Long cinemaItemId;
+    private String cinemaName;
     private List<OrderDetailResponse> orderDetails;
 }

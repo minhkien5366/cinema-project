@@ -5,8 +5,8 @@ import com.example.cinema.entity.Showtime;
 import java.util.List;
 
 public interface ShowtimeService {
-    List<Showtime> getAll();
-    Showtime getById(Long id); // Thêm dòng này
+    List<Showtime> getAll(); // Tự động lọc theo Admin/SuperAdmin
+    Showtime getById(Long id);
     List<Showtime> getByMovie(Long movieId);
     List<Showtime> getByCinemaItem(Long cinemaItemId);
     Showtime createShowtime(ShowtimeRequest request);

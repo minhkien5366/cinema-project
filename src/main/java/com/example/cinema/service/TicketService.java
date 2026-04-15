@@ -9,6 +9,6 @@ public interface TicketService {
     List<Ticket> getMyTickets();
     Ticket getByBookingCode(String code);
     List<Ticket> getTicketsByShowtime(Long showtimeId);
-    List<Ticket> getAllTickets();
+    List<Ticket> getAllTickets(); // Tự động lọc theo quyền Admin rạp
     void cancelTicket(Long ticketId);
 }
