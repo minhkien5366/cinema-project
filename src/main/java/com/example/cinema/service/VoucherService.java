@@ -5,16 +5,19 @@ import com.example.cinema.entity.Voucher;
 import java.util.List;
 
 public interface VoucherService {
-    // Admin lấy danh sách mã theo quyền
     List<Voucher> getAllVouchers();
-
-    // Khách hàng lấy danh sách mã khả dụng của rạp
-    List<Voucher> getAvailableVouchers(Long cinemaItemId);
-
+    
     Voucher createVoucher(VoucherRequest request);
-
+    
     void deleteVoucher(Long id);
 
-    // Hàm quan trọng để OrderService gọi khi khách đặt vé
+    Voucher updateVoucher(Long id, VoucherRequest request);
+
+    List<Voucher> getAvailableVouchers(Long cinemaItemId);
+
+    void saveVoucherToUser(Long userId, Long voucherId);
+
+    List<Voucher> getVouchersByUser(Long userId);
+
     Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double currentTotal);
 }

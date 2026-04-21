@@ -40,4 +40,5 @@ public class VoucherRequest {
     private LocalDateTime endDate;
 
     private Long cinemaItemId; // NULL = Global (Super Admin), có ID = Theo rạp (Admin)
+    private Long promotionId;
 }

@@ -7,6 +7,8 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Set;
+import java.util.List;
+import java.util.ArrayList;
 
 @Entity
 @Table(name = "users")
@@ -28,7 +30,6 @@ public class User {
     private String mobileNumber;
     private LocalDate dateOfBirth;
 
-    // --- TRƯỜNG NÂNG CAO CHO SUPER ADMIN ---
     private Long managedCinemaItemId; 
 
     @CreationTimestamp
@@ -43,4 +44,12 @@ public class User {
         inverseJoinColumns = @JoinColumn(name = "role_id")
     )
     private Set<Role> roles;
+
+    @ManyToMany
+    @JoinTable(
+        name = "user_vouchers", // Tên bảng trung gian trong DB
+        joinColumns = @JoinColumn(name = "user_id"),
+        inverseJoinColumns = @JoinColumn(name = "voucher_id")
+    )
+    private List<Voucher> vouchers = new ArrayList<>();
 }

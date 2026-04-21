@@ -27,52 +27,45 @@ public class ShowtimeServiceImpl implements ShowtimeService {
     @Override
     public List<Showtime> getAll() {
         User user = getCurrentUser();
-        if (isSuperAdmin(user)) {
-            return showtimeRepository.findAll();
-        }
-        // Admin thường: Chỉ thấy suất chiếu của chi nhánh mình quản lý
+        if (isSuperAdmin(user)) return showtimeRepository.findAll();
         return showtimeRepository.findByCinemaItem_Id(user.getManagedCinemaItemId());
     }
 
     @Override
     public Showtime getById(Long id) {
-        return showtimeRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
+        return showtimeRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
     }
 
     @Override
-    public List<Showtime> getByMovie(Long movieId) { 
-        return showtimeRepository.findByMovieId(movieId); 
-    }
+    public List<Showtime> getByMovie(Long movieId) { return showtimeRepository.findByMovieId(movieId); }
 
     @Override
-    public List<Showtime> getByCinemaItem(Long cinemaItemId) { 
-        return showtimeRepository.findByCinemaItem_Id(cinemaItemId); 
-    }
+    public List<Showtime> getByCinemaItem(Long cinemaItemId) { return showtimeRepository.findByCinemaItem_Id(cinemaItemId); }
 
     @Override
     @Transactional
     public Showtime createShowtime(ShowtimeRequest request) {
         validateBranchAccess(request.getCinemaItemId());
 
-        Movie movie = movieRepository.findById(request.getMovieId())
-                .orElseThrow(() -> new ResourceNotFoundException("Phim không tồn tại"));
-        CinemaItem cinemaItem = cinemaItemRepository.findById(request.getCinemaItemId())
-                .orElseThrow(() -> new ResourceNotFoundException("Chi nhánh rạp không tồn tại"));
-        Room room = roomRepository.findById(request.getRoomId())
-                .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
+        // RÀNG BUỘC 1: Không tạo suất chiếu trong quá khứ
+        if (request.getStartTime().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Thời gian bắt đầu không thể ở quá khứ!");
+        }
 
-        // Tính thời gian kết thúc = Bắt đầu + Thời lượng phim + 15 phút dọn phòng
-        LocalDateTime endTime = request.getStartTime().plusMinutes(movie.getDuration() + 15);
+        Movie movie = movieRepository.findById(request.getMovieId()).orElseThrow(() -> new ResourceNotFoundException("Phim không tồn tại"));
+        Room room = roomRepository.findById(request.getRoomId()).orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
 
-        // Kiểm tra trùng lịch tại phòng này
-        checkShowtimeOverlap(room.getId(), request.getStartTime(), endTime, null);
+        // RÀNG BUỘC 2: Tự động tính thời gian kết thúc dựa trên thời lượng phim
+        LocalDateTime endTime = request.getStartTime().plusMinutes(movie.getDuration());
+
+        // RÀNG BUỘC 3: Kiểm tra trùng lịch và 20 phút dọn phòng
+        checkShowtimeOverlapWithBuffer(room.getId(), request.getStartTime(), endTime, null);
 
         Showtime showtime = new Showtime();
         showtime.setStartTime(request.getStartTime());
         showtime.setEndTime(endTime);
         showtime.setMovie(movie);
-        showtime.setCinemaItem(cinemaItem);
+        showtime.setCinemaItem(cinemaItemRepository.findById(request.getCinemaItemId()).get());
         showtime.setRoom(room);
 
         return showtimeRepository.save(showtime);
@@ -81,72 +74,70 @@ public class ShowtimeServiceImpl implements ShowtimeService {
     @Override
     @Transactional
     public Showtime updateShowtime(Long id, ShowtimeRequest request) {
-        Showtime showtime = showtimeRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
-        
-        validateBranchAccess(showtime.getCinemaItem().getId()); // Check quyền rạp cũ
-        validateBranchAccess(request.getCinemaItemId());       // Check quyền rạp mới (nếu đổi rạp)
+        Showtime showtime = showtimeRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
+        validateBranchAccess(showtime.getCinemaItem().getId());
 
-        Movie movie = movieRepository.findById(request.getMovieId())
-                .orElseThrow(() -> new ResourceNotFoundException("Phim không tồn tại"));
-        Room room = roomRepository.findById(request.getRoomId())
-                .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
-        CinemaItem cinemaItem = cinemaItemRepository.findById(request.getCinemaItemId())
-                .orElseThrow(() -> new ResourceNotFoundException("Chi nhánh không tồn tại"));
+        Movie movie = movieRepository.findById(request.getMovieId()).orElseThrow(() -> new ResourceNotFoundException("Phim không tồn tại"));
+        Room room = roomRepository.findById(request.getRoomId()).orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
 
-        LocalDateTime endTime = request.getStartTime().plusMinutes(movie.getDuration() + 15);
-        checkShowtimeOverlap(room.getId(), request.getStartTime(), endTime, id);
+        LocalDateTime endTime = request.getStartTime().plusMinutes(movie.getDuration());
+        checkShowtimeOverlapWithBuffer(room.getId(), request.getStartTime(), endTime, id);
 
         showtime.setStartTime(request.getStartTime());
         showtime.setEndTime(endTime);
         showtime.setMovie(movie);
         showtime.setRoom(room);
-        showtime.setCinemaItem(cinemaItem);
         
         return showtimeRepository.save(showtime);
     }
 
     @Override
     public List<Showtime> getByMovieAndDate(Long movieId, String dateStr) {
-        LocalDate date = LocalDate.parse(dateStr); 
-        return showtimeRepository.findByMovieIdAndDate(movieId, date);
+        return showtimeRepository.findByMovieIdAndDate(movieId, LocalDate.parse(dateStr));
     }
 
     @Override
     @Transactional
     public void deleteShowtime(Long id) {
-        Showtime showtime = showtimeRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy suất chiếu"));
+        Showtime showtime = showtimeRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy suất chiếu"));
         validateBranchAccess(showtime.getCinemaItem().getId());
         showtimeRepository.deleteById(id);
     }
 
-    // --- HELPER METHODS BẢO MẬT ---
+    // LOGIC KIỂM TRA TRÙNG LỊCH + 20 PHÚT DỌN PHÒNG
+    private void checkShowtimeOverlapWithBuffer(Long roomId, LocalDateTime newStart, LocalDateTime newEnd, Long excludeId) {
+        List<Showtime> existing = showtimeRepository.findByRoomId(roomId);
+        int buffer = 20; // 20 phút dọn dẹp
+
+        for (Showtime s : existing) {
+            if (excludeId != null && s.getId().equals(excludeId)) continue;
+
+            // Suất chiếu mới phải kết thúc TRƯỚC khi suất cũ bắt đầu 20p 
+            // HOẶC suất chiếu mới phải bắt đầu SAU khi suất cũ kết thúc 20p
+            LocalDateTime sStartBuffer = s.getStartTime().minusMinutes(buffer);
+            LocalDateTime sEndBuffer = s.getEndTime().plusMinutes(buffer);
+
+            if (newStart.isBefore(sEndBuffer) && newEnd.isAfter(sStartBuffer)) {
+                throw new RuntimeException("Trùng lịch hoặc quá sát suất chiếu khác (Cần 20p dọn phòng)! Đang có suất chiếu từ " 
+                        + s.getStartTime().toLocalTime() + " đến " + s.getEndTime().toLocalTime());
+            }
+        }
+    }
+
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         return userRepository.findByEmail(email).orElseThrow(() -> new ResourceNotFoundException("User không tồn tại"));
     }
 
     private boolean isSuperAdmin(User user) {
-        return user.getRoles().stream().anyMatch(r -> r.getRoleName().equals("SUPER_ADMIN"));
+        return user.getRoles().stream().anyMatch(r -> r.getRoleName().equalsIgnoreCase("SUPER_ADMIN") || r.getRoleName().equalsIgnoreCase("ROLE_SUPER_ADMIN"));
     }
 
     private void validateBranchAccess(Long cinemaItemId) {
         User user = getCurrentUser();
         if (isSuperAdmin(user)) return;
         if (user.getManagedCinemaItemId() == null || !user.getManagedCinemaItemId().equals(cinemaItemId)) {
-            throw new RuntimeException("Bạn không có quyền quản lý suất chiếu tại chi nhánh rạp này!");
-        }
-    }
-
-    private void checkShowtimeOverlap(Long roomId, LocalDateTime start, LocalDateTime end, Long excludeId) {
-        List<Showtime> existing = showtimeRepository.findByRoomId(roomId); 
-        for (Showtime s : existing) {
-            if (excludeId != null && s.getId().equals(excludeId)) continue;
-            if (start.isBefore(s.getEndTime()) && end.isAfter(s.getStartTime())) {
-                throw new RuntimeException("Lịch bị trùng! Phòng đang có phim chiếu từ " 
-                        + s.getStartTime().toLocalTime() + " đến " + s.getEndTime().toLocalTime());
-            }
+            throw new RuntimeException("Bạn không có quyền quản lý tại chi nhánh rạp này!");
         }
     }
 }

@@ -9,8 +9,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.*;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -18,76 +22,54 @@ public class PromotionServiceImpl implements PromotionService {
 
     private final PromotionRepository promotionRepository;
     private final CinemaItemRepository cinemaItemRepository;
-    private final VoucherRepository voucherRepository;
     private final MovieRepository movieRepository;
     private final UserRepository userRepository;
+    
+    private final String uploadDir = "uploads/promotions/";
 
     @Override
     public List<Promotion> getPromotionsForClient(Long cinemaItemId) {
-        // Khách hàng xem: Tin của chi nhánh + Tin chung (cinemaItem IS NULL)
+        // Ưu tiên lấy tin của rạp khách đang chọn hoặc tin chung (null)
         return promotionRepository.findByCinemaItem_IdOrCinemaItemIsNull(cinemaItemId);
     }
 
     @Override
     public List<Promotion> getAllPromotions() {
         User user = getCurrentUser();
-        if (isSuperAdmin(user)) {
-            return promotionRepository.findAll();
-        }
-        // Admin thường: Chỉ thấy tin rạp mình quản lý
+        if (isSuperAdmin(user)) return promotionRepository.findAll();
         return promotionRepository.findByCinemaItem_Id(user.getManagedCinemaItemId());
     }
 
     @Override
     public Promotion getPromotionById(Long id) {
         return promotionRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sự kiện"));
+                .orElseThrow(() -> new ResourceNotFoundException("Sự kiện không tồn tại!"));
     }
 
     @Override
     @Transactional
-    public Promotion createPromotion(PromotionRequest request) {
-        User user = getCurrentUser();
+    public Promotion createPromotion(PromotionRequest request, MultipartFile file) {
         Promotion promotion = new Promotion();
         mapRequestToEntity(request, promotion);
-
-        // --- FIX LỖI PHÂN QUYỀN TẠI ĐÂY ---
-        if (isSuperAdmin(user)) {
-            // Super Admin: Có thể tạo tin cho 1 rạp cụ thể hoặc tin chung toàn hệ thống (null)
-            if (request.getCinemaItemId() != null) {
-                promotion.setCinemaItem(cinemaItemRepository.findById(request.getCinemaItemId()).orElse(null));
-            } else {
-                promotion.setCinemaItem(null); // Tin tức Global
-            }
-        } else {
-            // Admin thường: Bắt buộc gán vào rạp đang quản lý
-            Long managedId = user.getManagedCinemaItemId();
-            if (managedId == null) {
-                throw new RuntimeException("Lỗi: Tài khoản Admin chưa được gán chi nhánh rạp quản lý!");
-            }
-            promotion.setCinemaItem(cinemaItemRepository.findById(managedId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy chi nhánh rạp quản lý")));
+        
+        if (file != null && !file.isEmpty()) {
+            promotion.setThumbnail(saveFile(file));
         }
-
         return promotionRepository.save(promotion);
     }
 
     @Override
     @Transactional
-    public Promotion updatePromotion(Long id, PromotionRequest request) {
+    public Promotion updatePromotion(Long id, PromotionRequest request, MultipartFile file) {
         Promotion promotion = promotionRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Sự kiện không tồn tại"));
-        
-        // Kiểm tra quyền: Super Admin hoặc Admin quản lý đúng rạp đó
-        validateAdminPermission(promotion.getCinemaItem() != null ? promotion.getCinemaItem().getId() : null);
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sự kiện"));
         
         mapRequestToEntity(request, promotion);
         
-        // Cập nhật lại chi nhánh nếu Super Admin muốn đổi rạp cho bài viết
-        if (isSuperAdmin(getCurrentUser()) && request.getCinemaItemId() != null) {
-            promotion.setCinemaItem(cinemaItemRepository.findById(request.getCinemaItemId()).orElse(null));
+        if (file != null && !file.isEmpty()) {
+            deleteOldFile(promotion.getThumbnail());
+            promotion.setThumbnail(saveFile(file));
         }
-
         return promotionRepository.save(promotion);
     }
 
@@ -96,49 +78,55 @@ public class PromotionServiceImpl implements PromotionService {
     public void deletePromotion(Long id) {
         Promotion promotion = promotionRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Sự kiện không tồn tại"));
-        
-        validateAdminPermission(promotion.getCinemaItem() != null ? promotion.getCinemaItem().getId() : null);
+        deleteOldFile(promotion.getThumbnail());
         promotionRepository.delete(promotion);
     }
 
-    // --- HELPER METHODS ĐÃ ĐƯỢC TỐI ƯU ---
+    // --- HELPER METHODS ---
 
-    private User getCurrentUser() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("Phiên đăng nhập hết hạn, vui lòng login lại!"));
+    private String saveFile(MultipartFile file) {
+        try {
+            Path path = Paths.get(uploadDir);
+            if (!Files.exists(path)) Files.createDirectories(path);
+            String fileName = UUID.randomUUID().toString() + "_" + file.getOriginalFilename();
+            Files.copy(file.getInputStream(), path.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
+            return fileName;
+        } catch (IOException e) {
+            throw new RuntimeException("Lỗi upload ảnh sự kiện: " + e.getMessage());
+        }
     }
 
-    /**
-     * Fix: Nhận diện cả "SUPER_ADMIN" và "ROLE_SUPER_ADMIN"
-     */
-    private boolean isSuperAdmin(User user) {
-        return user.getRoles().stream()
-                .anyMatch(r -> r.getRoleName().equalsIgnoreCase("SUPER_ADMIN") 
-                            || r.getRoleName().equalsIgnoreCase("ROLE_SUPER_ADMIN"));
-    }
-
-    private void validateAdminPermission(Long targetCinemaId) {
-        User user = getCurrentUser();
-        if (isSuperAdmin(user)) return; // Sếp tổng được quyền đi qua
-
-        if (user.getManagedCinemaItemId() == null || !user.getManagedCinemaItemId().equals(targetCinemaId)) {
-            throw new RuntimeException("Bạn không có quyền thao tác trên bài viết của chi nhánh rạp khác!");
+    private void deleteOldFile(String fileName) {
+        if (fileName != null) {
+            try { Files.deleteIfExists(Paths.get(uploadDir + fileName)); } catch (IOException ignored) {}
         }
     }
 
     private void mapRequestToEntity(PromotionRequest request, Promotion promotion) {
         promotion.setTitle(request.getTitle());
         promotion.setContent(request.getContent());
-        promotion.setThumbnail(request.getImage());
         
-        // Gán Voucher nếu có
-        if (request.getVoucherId() != null) {
-            promotion.setVoucher(voucherRepository.findById(request.getVoucherId()).orElse(null));
-        }
-        // Gán Phim nếu có
-        if (request.getMovieId() != null) {
+        if (request.getMovieId() != null && request.getMovieId() != 0) {
             promotion.setMovie(movieRepository.findById(request.getMovieId()).orElse(null));
+        } else {
+            promotion.setMovie(null);
         }
+
+        if (request.getCinemaItemId() != null && request.getCinemaItemId() != 0) {
+            promotion.setCinemaItem(cinemaItemRepository.findById(request.getCinemaItemId()).orElse(null));
+        } else {
+            promotion.setCinemaItem(null);
+        }
+    }
+
+    private User getCurrentUser() {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userRepository.findByEmail(email).orElseThrow(() -> new RuntimeException("User không tồn tại"));
+    }
+
+    private boolean isSuperAdmin(User user) {
+        return user.getRoles().stream().anyMatch(r -> 
+            r.getRoleName().equalsIgnoreCase("SUPER_ADMIN") || 
+            r.getRoleName().equalsIgnoreCase("ROLE_SUPER_ADMIN"));
     }
 }

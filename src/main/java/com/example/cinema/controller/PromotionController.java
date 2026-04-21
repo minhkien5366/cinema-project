@@ -5,9 +5,11 @@ import com.example.cinema.dto.PromotionRequest;
 import com.example.cinema.entity.Promotion;
 import com.example.cinema.service.PromotionService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -18,33 +20,44 @@ public class PromotionController {
 
     private final PromotionService promotionService;
 
-    // Lấy tin tức cho khách hàng (theo rạp)
     @GetMapping("/client/{cinemaItemId}")
     public ResponseEntity<ApiResponse<List<Promotion>>> getForClient(@PathVariable Long cinemaItemId) {
         return ResponseEntity.ok(ApiResponse.<List<Promotion>>builder()
-                .status(200).message("Thành công").data(promotionService.getPromotionsForClient(cinemaItemId)).build());
+                .status(200).data(promotionService.getPromotionsForClient(cinemaItemId)).build());
     }
 
-    // Lấy tất cả tin tức (Admin)
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponse<Promotion>> getById(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.<Promotion>builder()
+                .status(200).data(promotionService.getPromotionById(id)).build());
+    }
+
     @GetMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<List<Promotion>>> getAll() {
         return ResponseEntity.ok(ApiResponse.<List<Promotion>>builder()
-                .status(200).message("Thành công").data(promotionService.getAllPromotions()).build());
+                .status(200).data(promotionService.getAllPromotions()).build());
     }
 
-    @PostMapping
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
-    public ResponseEntity<ApiResponse<Promotion>> create(@RequestBody PromotionRequest request) {
+    public ResponseEntity<ApiResponse<Promotion>> create(
+            @RequestPart("promotion") PromotionRequest request,
+            @RequestPart(value = "file", required = false) MultipartFile file) {
         return ResponseEntity.status(201).body(ApiResponse.<Promotion>builder()
-                .status(201).message("Tạo sự kiện thành công").data(promotionService.createPromotion(request)).build());
+                .status(201).message("Tạo sự kiện thành công")
+                .data(promotionService.createPromotion(request, file)).build());
     }
 
-    @PutMapping("/{id}")
+    @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
-    public ResponseEntity<ApiResponse<Promotion>> update(@PathVariable Long id, @RequestBody PromotionRequest request) {
+    public ResponseEntity<ApiResponse<Promotion>> update(
+            @PathVariable Long id,
+            @RequestPart("promotion") PromotionRequest request,
+            @RequestPart(value = "file", required = false) MultipartFile file) {
         return ResponseEntity.ok(ApiResponse.<Promotion>builder()
-                .status(200).message("Cập nhật thành công").data(promotionService.updatePromotion(id, request)).build());
+                .status(200).message("Cập nhật thành công")
+                .data(promotionService.updatePromotion(id, request, file)).build());
     }
 
     @DeleteMapping("/{id}")

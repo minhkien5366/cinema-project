@@ -6,7 +6,7 @@ import lombok.Data;
 public class SeatRequest {
     private String seatRow;
     private String seatNumber;
-    private String seatType; 
+    private String seatType; // NORMAL, VIP, COUPLE
     private Double price;
     private Long roomId;
     private String status; 

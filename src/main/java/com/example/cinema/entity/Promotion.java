@@ -27,11 +27,6 @@ public class Promotion {
     private String thumbnail; // Ảnh đại diện sự kiện
 
     @ManyToOne
-    @JoinColumn(name = "voucher_id")
-    @JsonIgnoreProperties("promotions")
-    private Voucher voucher; // Liên kết voucher nếu sự kiện có tặng mã
-
-    @ManyToOne
     @JoinColumn(name = "movie_id")
     @JsonIgnoreProperties("showtimes")
     private Movie movie; // Liên kết phim nếu là ưu đãi dành cho phim cụ thể

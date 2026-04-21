@@ -6,6 +6,5 @@ import lombok.Data;
 public class ComboRequest {
     private String name;
     private String description;
-    private String imageUrl;
     private Double price;
 }
