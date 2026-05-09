@@ -42,8 +42,8 @@ public class PromotionController {
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Promotion>> create(
-            @RequestPart("promotion") PromotionRequest request,
-            @RequestPart(value = "file", required = false) MultipartFile file) {
+            @ModelAttribute PromotionRequest request, // THAY ĐỔI TẠI ĐÂY
+            @RequestParam(value = "file", required = false) MultipartFile file) { // Dùng @RequestParam cho file
         return ResponseEntity.status(201).body(ApiResponse.<Promotion>builder()
                 .status(201).message("Tạo sự kiện thành công")
                 .data(promotionService.createPromotion(request, file)).build());
@@ -53,8 +53,8 @@ public class PromotionController {
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Promotion>> update(
             @PathVariable Long id,
-            @RequestPart("promotion") PromotionRequest request,
-            @RequestPart(value = "file", required = false) MultipartFile file) {
+            @ModelAttribute PromotionRequest request, // THAY ĐỔI TẠI ĐÂY
+            @RequestParam(value = "file", required = false) MultipartFile file) { // Dùng @RequestParam cho file
         return ResponseEntity.ok(ApiResponse.<Promotion>builder()
                 .status(200).message("Cập nhật thành công")
                 .data(promotionService.updatePromotion(id, request, file)).build());

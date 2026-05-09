@@ -31,7 +31,8 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     boolean existsBySeatAndShowtimeAndStatusIn(Seat seat, Showtime showtime, List<String> statuses);
 
     Optional<Ticket> findBySeatAndShowtimeAndUser(Seat seat, Showtime showtime, User user);
-
+boolean existsBySeatId(Long seatId);
+boolean existsBySeat_Room_Id(Long roomId);
 boolean existsByUser_UserIdAndShowtime_Movie_IdAndStatusAndShowtime_EndTimeBefore(
     Long userId, Long movieId, String status, java.time.LocalDateTime now);
     // --- THÊM MỚI: Tìm vé để cập nhật trạng thái khi thanh toán/hủy đơn ---

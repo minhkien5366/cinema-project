@@ -27,7 +27,6 @@ public class BannerController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<List<Banner>>> getAllBanners() {
         return ResponseEntity.ok(ApiResponse.<List<Banner>>builder()
                 .status(200).data(bannerService.getAllBanners()).build());

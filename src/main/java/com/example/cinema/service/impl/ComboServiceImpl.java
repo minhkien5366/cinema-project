@@ -4,6 +4,7 @@ import com.example.cinema.dto.ComboRequest;
 import com.example.cinema.entity.Combo;
 import com.example.cinema.exception.ResourceNotFoundException;
 import com.example.cinema.repository.ComboRepository;
+import com.example.cinema.service.CloudinaryService;
 import com.example.cinema.service.ComboService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -11,16 +12,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.*;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class ComboServiceImpl implements ComboService {
 
     private final ComboRepository comboRepository;
-    private final String uploadDir = "uploads/combos/";
+    private final CloudinaryService cloudinaryService;
+
+    // ================= GET =================
 
     @Override
     public List<Combo> getAllCombos() {
@@ -30,74 +31,83 @@ public class ComboServiceImpl implements ComboService {
     @Override
     public Combo getComboById(Long id) {
         return comboRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Combo không tồn tại với ID: " + id));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Combo không tồn tại ID: " + id));
     }
+
+    // ================= CREATE =================
 
     @Override
     @Transactional
     public Combo createCombo(ComboRequest request, MultipartFile file) {
+
         Combo combo = new Combo();
-        mapRequestToEntity(request, combo);
-        
-        if (file != null && !file.isEmpty()) {
-            combo.setImageUrl(saveFile(file));
-        }
-        
+        mapRequest(request, combo);
+
+        uploadImageIfExist(combo, file);
+
         return comboRepository.save(combo);
     }
+
+    // ================= UPDATE =================
 
     @Override
     @Transactional
     public Combo updateCombo(Long id, ComboRequest request, MultipartFile file) {
-        Combo combo = comboRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Combo không tồn tại"));
-        
-        mapRequestToEntity(request, combo);
+
+        Combo combo = getComboById(id);
+
+        mapRequest(request, combo);
 
         if (file != null && !file.isEmpty()) {
-            deleteOldFile(combo.getImageUrl()); // Xóa ảnh cũ
-            combo.setImageUrl(saveFile(file));  // Lưu ảnh mới
+
+            deleteOldImage(combo);
+
+            uploadImageIfExist(combo, file);
         }
-        
+
         return comboRepository.save(combo);
     }
+
+    // ================= DELETE =================
 
     @Override
     @Transactional
     public void deleteCombo(Long id) {
-        Combo combo = comboRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy combo để xóa"));
-        
-        deleteOldFile(combo.getImageUrl());
+
+        Combo combo = getComboById(id);
+
+        deleteOldImage(combo);
+
         comboRepository.delete(combo);
     }
 
-    // --- HELPER METHODS ---
+    // ================= HELPER =================
 
-    private String saveFile(MultipartFile file) {
-        try {
-            Path path = Paths.get(uploadDir);
-            if (!Files.exists(path)) Files.createDirectories(path);
-
-            String fileName = UUID.randomUUID().toString() + "_" + file.getOriginalFilename();
-            Files.copy(file.getInputStream(), path.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
-            return fileName;
-        } catch (IOException e) {
-            throw new RuntimeException("Lỗi lưu ảnh bắp nước: " + e.getMessage());
-        }
-    }
-
-    private void deleteOldFile(String fileName) {
-        if (fileName != null && !fileName.isEmpty()) {
-            try {
-                Files.deleteIfExists(Paths.get(uploadDir + fileName));
-            } catch (IOException ignored) {}
-        }
-    }
-
-    private void mapRequestToEntity(ComboRequest request, Combo combo) {
+    private void mapRequest(ComboRequest request, Combo combo) {
         combo.setName(request.getName());
         combo.setDescription(request.getDescription());
         combo.setPrice(request.getPrice());
+    }
+
+    private void uploadImageIfExist(Combo combo, MultipartFile file) {
+        if (file == null || file.isEmpty()) return;
+
+        try {
+            String url = cloudinaryService.uploadImage(file, "combos");
+            combo.setImageUrl(url);
+        } catch (IOException e) {
+            throw new RuntimeException("Upload ảnh lỗi");
+        }
+    }
+
+    private void deleteOldImage(Combo combo) {
+        if (combo.getImageUrl() == null) return;
+
+        try {
+            cloudinaryService.deleteImage(combo.getImageUrl());
+        } catch (IOException e) {
+            System.err.println("Không xoá được ảnh cũ");
+        }
     }
 }

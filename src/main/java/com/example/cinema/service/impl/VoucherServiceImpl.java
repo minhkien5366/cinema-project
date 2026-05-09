@@ -6,8 +6,6 @@ import com.example.cinema.exception.ResourceNotFoundException;
 import com.example.cinema.repository.*;
 import com.example.cinema.service.VoucherService;
 import lombok.RequiredArgsConstructor;
-
-import org.apache.coyote.BadRequestException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,7 +18,6 @@ import java.util.List;
 public class VoucherServiceImpl implements VoucherService {
 
     private final VoucherRepository voucherRepository;
-    private final CinemaItemRepository cinemaItemRepository;
     private final UserRepository userRepository;
     private final PromotionRepository promotionRepository;
 
@@ -57,44 +54,31 @@ public class VoucherServiceImpl implements VoucherService {
             voucher.setPromotion(promotion);
         }
 
-        // Gắn vào Rạp cụ thể (nếu có)
-        if (request.getCinemaItemId() != null) {
-            voucher.setCinemaItem(cinemaItemRepository.findById(request.getCinemaItemId()).orElse(null));
-        }
-
         return voucherRepository.save(voucher);
     }
 
     @Override
     public Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double currentTotal) {
+        // cinemaItemId giờ không dùng để lọc trong DB nữa nhưng vẫn giữ ở param để tránh lỗi compile các chỗ gọi hàm này
         Voucher v = voucherRepository.findByCode(code.toUpperCase())
                 .orElseThrow(() -> new ResourceNotFoundException("Mã giảm giá không hợp lệ!"));
 
         LocalDateTime now = LocalDateTime.now();
         
-        // Kiểm tra thời gian
         if (v.getStartDate() != null && now.isBefore(v.getStartDate())) {
             throw new RuntimeException("Mã giảm giá chưa đến thời gian áp dụng!");
         }
         if (v.getEndDate() != null && now.isAfter(v.getEndDate())) {
             throw new RuntimeException("Mã giảm giá đã hết hạn sử dụng!");
         }
-        
-        // Kiểm tra số lượng
         if (v.getUsedCount() >= v.getUsageLimit()) {
             throw new RuntimeException("Mã giảm giá đã hết lượt sử dụng!");
         }
-        
-        // Kiểm tra điều kiện đơn hàng
         if (currentTotal < v.getMinOrderAmount()) {
             throw new RuntimeException("Đơn hàng chưa đủ điều kiện tối thiểu (" + String.format("%,.0f", v.getMinOrderAmount()) + "đ)");
         }
         
-        // Kiểm tra chi nhánh rạp
-        if (v.getCinemaItem() != null && !v.getCinemaItem().getId().equals(cinemaItemId)) {
-            throw new RuntimeException("Mã này chỉ áp dụng tại rạp: " + v.getCinemaItem().getName());
-        }
-        
+        // ĐÃ GỠ BỎ LOGIC KIỂM TRA CINEMA_ITEM
         return v;
     }
 
@@ -107,7 +91,6 @@ public class VoucherServiceImpl implements VoucherService {
         Voucher voucher = voucherRepository.findById(voucherId)
                 .orElseThrow(() -> new ResourceNotFoundException("Mã giảm giá không tồn tại"));
 
-        // Kiểm tra hạn trước khi cho lưu
         if (voucher.getEndDate() != null && LocalDateTime.now().isAfter(voucher.getEndDate())) {
             throw new RuntimeException("Mã này đã hết hạn, không thể lưu!");
         }
@@ -120,17 +103,14 @@ public class VoucherServiceImpl implements VoucherService {
         userRepository.save(user);
     }
 
-   @Override
+    @Override
     @Transactional
     public Voucher updateVoucher(Long id, VoucherRequest request) {
-        // 1. Kiểm tra quyền Super Admin (giống lúc tạo)
         validateSuperAdmin(); 
 
-        // 2. Kiểm tra voucher có tồn tại không
         Voucher voucher = voucherRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy voucher với ID: " + id));
 
-        // 3. Kiểm tra trùng mã code (Nếu đổi sang mã mới thì mã đó không được trùng với ai khác)
         String newCode = request.getCode().toUpperCase();
         if (!voucher.getCode().equals(newCode)) {
             if (voucherRepository.existsByCode(newCode)) {
@@ -138,7 +118,6 @@ public class VoucherServiceImpl implements VoucherService {
             }
         }
 
-        // 4. Cập nhật các thông tin cơ bản
         voucher.setCode(newCode);
         voucher.setTitle(request.getTitle());
         voucher.setDescription(request.getDescription());
@@ -147,26 +126,15 @@ public class VoucherServiceImpl implements VoucherService {
         voucher.setUsageLimit(request.getUsageLimit());
         voucher.setStartDate(request.getStartDate());
         voucher.setEndDate(request.getEndDate());
-        // Giữ nguyên usedCount cũ để không làm sai lệch lịch sử sử dụng
 
-        // 5. Cập nhật Sự kiện (Promotion) - Giống createVoucher
         if (request.getPromotionId() != null) {
             Promotion promotion = promotionRepository.findById(request.getPromotionId())
                     .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sự kiện với ID: " + request.getPromotionId()));
             voucher.setPromotion(promotion);
         } else {
-            voucher.setPromotion(null); // Nếu request gửi lên không có Promotion thì gỡ bỏ (tùy bặn)
+            voucher.setPromotion(null);
         }
 
-        // 6. Cập nhật Rạp áp dụng (CinemaItem) - Giống createVoucher
-        if (request.getCinemaItemId() != null) {
-            voucher.setCinemaItem(cinemaItemRepository.findById(request.getCinemaItemId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy rạp với ID: " + request.getCinemaItemId())));
-        } else {
-            voucher.setCinemaItem(null); // Nếu không chọn rạp thì coi như áp dụng toàn hệ thống
-        }
-
-        // 7. Lưu và trả về
         return voucherRepository.save(voucher);
     }
 
@@ -177,14 +145,10 @@ public class VoucherServiceImpl implements VoucherService {
         return user.getVouchers();
     }
 
-    /**
-     * FIX CHÍNH: Lấy Voucher theo Promotion cho Client
-     * Đã bao gồm check Now để tránh trả về mảng rỗng do lệch thời gian
-     */
     @Override
     public List<Voucher> getAvailableVouchers(Long promotionId) {
-        // Sử dụng LocalDateTime.now() để so khớp với Query trong Repository
-        return voucherRepository.findByPromotionId(promotionId, LocalDateTime.now());
+        // Sử dụng hàm Query custom đã fix trong Repository
+        return voucherRepository.findActiveVouchersByPromotionId(promotionId, LocalDateTime.now());
     }
 
     @Override
@@ -193,8 +157,6 @@ public class VoucherServiceImpl implements VoucherService {
         validateSuperAdmin();
         Voucher v = voucherRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy mã giảm giá để xóa"));
-        
-        // Trước khi xóa, cần gỡ mối quan hệ với User nếu có (tùy thuộc vào cấu trúc ManyToMany)
         voucherRepository.delete(v);
     }
 

@@ -8,6 +8,6 @@ public class MovieDTO {
     private String title;
     private String posterUrl;
     private Integer duration;
-    private String genreName; // Trả về tên thể loại thay vì ID
+    private String genreName; 
     private String status;
 }

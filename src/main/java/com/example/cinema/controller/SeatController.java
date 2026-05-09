@@ -89,4 +89,14 @@ public class SeatController {
                 .message("Xóa ghế thành công")
                 .build());
     }
+
+    @DeleteMapping("/room/{roomId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<String>> deleteSeatsByRoom(@PathVariable Long roomId) {
+        seatService.deleteSeatsByRoom(roomId); // Bạn cần viết thêm hàm này trong Service
+        return ResponseEntity.ok(ApiResponse.<String>builder()
+                .status(200)
+                .message("Đã xóa toàn bộ ghế của phòng " + roomId)
+                .build());
+    }
 }

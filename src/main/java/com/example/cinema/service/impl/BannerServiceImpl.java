@@ -5,22 +5,23 @@ import com.example.cinema.entity.Banner;
 import com.example.cinema.exception.ResourceNotFoundException;
 import com.example.cinema.repository.BannerRepository;
 import com.example.cinema.service.BannerService;
+import com.example.cinema.service.CloudinaryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.*;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class BannerServiceImpl implements BannerService {
 
     private final BannerRepository bannerRepository;
-    private final String uploadDir = "uploads/banners/";
+    private final CloudinaryService cloudinaryService;
+
+    // ================= GET =================
 
     @Override
     public List<Banner> getAllBanners() {
@@ -35,67 +36,88 @@ public class BannerServiceImpl implements BannerService {
     @Override
     public Banner getBannerById(Long id) {
         return bannerRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Banner ID: " + id));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Không tìm thấy Banner ID: " + id));
     }
+
+    // ================= CREATE =================
 
     @Override
     @Transactional
     public Banner createBanner(BannerRequest request, MultipartFile file) {
+
         Banner banner = new Banner();
         mapRequestToEntity(request, banner);
 
         if (file != null && !file.isEmpty()) {
-            banner.setImageUrl(saveFile(file));
+            try {
+                String url = cloudinaryService.uploadImage(file, "banners");
+                banner.setImageUrl(url);
+            } catch (IOException e) {
+                throw new RuntimeException("Upload banner lỗi: " + e.getMessage());
+            }
         }
+
         return bannerRepository.save(banner);
     }
+
+    // ================= UPDATE =================
 
     @Override
     @Transactional
     public Banner updateBanner(Long id, BannerRequest request, MultipartFile file) {
+
         Banner banner = bannerRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Banner"));
-        
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Không tìm thấy Banner"));
+
         mapRequestToEntity(request, banner);
 
         if (file != null && !file.isEmpty()) {
-            deleteOldFile(banner.getImageUrl()); // Xóa ảnh cũ
-            banner.setImageUrl(saveFile(file)); // Lưu ảnh mới
+            try {
+
+                // Xóa ảnh cũ trên Cloudinary
+                if (banner.getImageUrl() != null &&
+                        banner.getImageUrl().contains("cloudinary")) {
+
+                    cloudinaryService.deleteImage(banner.getImageUrl());
+                }
+
+                String url = cloudinaryService.uploadImage(file, "banners");
+                banner.setImageUrl(url);
+
+            } catch (IOException e) {
+                throw new RuntimeException("Update banner lỗi: " + e.getMessage());
+            }
         }
+
         return bannerRepository.save(banner);
     }
+
+    // ================= DELETE =================
 
     @Override
     @Transactional
     public void deleteBanner(Long id) {
+
         Banner banner = bannerRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Banner"));
-        
-        deleteOldFile(banner.getImageUrl());
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Không tìm thấy Banner"));
+
+        try {
+            if (banner.getImageUrl() != null &&
+                    banner.getImageUrl().contains("cloudinary")) {
+
+                cloudinaryService.deleteImage(banner.getImageUrl());
+            }
+        } catch (IOException e) {
+            System.err.println("Không thể xóa banner cloud: " + e.getMessage());
+        }
+
         bannerRepository.delete(banner);
     }
 
-    // --- HELPER METHODS ---
-    private String saveFile(MultipartFile file) {
-        try {
-            Path path = Paths.get(uploadDir);
-            if (!Files.exists(path)) Files.createDirectories(path);
-
-            String fileName = UUID.randomUUID().toString() + "_" + file.getOriginalFilename();
-            Files.copy(file.getInputStream(), path.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
-            return fileName;
-        } catch (IOException e) {
-            throw new RuntimeException("Lỗi lưu file banner: " + e.getMessage());
-        }
-    }
-
-    private void deleteOldFile(String fileName) {
-        if (fileName != null) {
-            try {
-                Files.deleteIfExists(Paths.get(uploadDir + fileName));
-            } catch (IOException ignored) {}
-        }
-    }
+    // ================= HELPER =================
 
     private void mapRequestToEntity(BannerRequest request, Banner banner) {
         banner.setTitle(request.getTitle());

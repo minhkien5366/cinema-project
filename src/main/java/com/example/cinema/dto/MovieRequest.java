@@ -15,5 +15,4 @@ public class MovieRequest {
     private String trailerUrl;
     private LocalDate releaseDate;
     private Integer genreId; 
-    // Không để posterUrl ở đây nữa vì sẽ truyền file riêng qua Controller
 }

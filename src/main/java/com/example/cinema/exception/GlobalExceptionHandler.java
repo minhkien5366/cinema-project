@@ -15,4 +15,13 @@ public class GlobalExceptionHandler {
                 .message(ex.getMessage())
                 .build();
     }
+
+    @ExceptionHandler(RuntimeException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST) // Trả về 400 thay vì 403
+    public ApiResponse<String> handleRuntimeException(RuntimeException ex) {
+        return ApiResponse.<String>builder()
+                .status(HttpStatus.BAD_REQUEST.value())
+                .message(ex.getMessage()) // Nó sẽ hiện: "Mã giảm giá đã hết hạn!"
+                .build();
+    }
 }

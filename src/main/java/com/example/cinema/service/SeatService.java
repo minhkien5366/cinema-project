@@ -12,4 +12,5 @@ public interface SeatService {
     List<Seat> generateSeatsForRoom(Long roomId, int rows, int seatsPerRow);
     Seat updateSeat(Long id, SeatRequest request);
     void deleteSeat(Long id);
+    void deleteSeatsByRoom(Long roomId);
 }

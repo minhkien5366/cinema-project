@@ -18,7 +18,7 @@ public interface VoucherRepository extends JpaRepository<Voucher, Long> {
     boolean existsByCode(String code);
 
     /**
-     * DÀNH CHO CLIENT: Lấy mã còn hạn, còn lượt dùng
+     * DÀNH CHO CLIENT: Lấy mã còn hạn, còn lượt dùng theo Sự kiện
      */
     @Query("SELECT v FROM Voucher v WHERE v.promotion.id = :promotionId " +
            "AND v.startDate <= :now AND v.endDate >= :now " +
@@ -27,21 +27,18 @@ public interface VoucherRepository extends JpaRepository<Voucher, Long> {
                                                  @Param("now") LocalDateTime now);
 
     /**
-     * DÀNH CHO ADMIN/TEST: Lấy tất cả mã của 1 sự kiện (không quan tâm ngày giờ)
-     * Dùng cái này để debug khi Swagger báo mảng rỗng []
+     * Lấy tất cả mã của 1 sự kiện
      */
-    List<Voucher> findByPromotionId(Long promotionId, LocalDateTime now);
+    List<Voucher> findByPromotionId(Long promotionId);
 
     /**
-     * Lấy voucher khả dụng cho rạp hoặc dùng chung toàn hệ thống
+     * FIX CHÍNH: Lấy voucher khả dụng (Bỏ kiểm tra cinemaItem)
+     * Giờ đây tất cả Voucher đều là dùng chung toàn hệ thống
      */
-    @Query("SELECT v FROM Voucher v WHERE (v.cinemaItem.id = :cinemaItemId OR v.cinemaItem IS NULL) " +
-           "AND v.startDate <= :now AND v.endDate >= :now " +
+    @Query("SELECT v FROM Voucher v WHERE v.startDate <= :now " +
+           "AND v.endDate >= :now " +
            "AND v.usedCount < v.usageLimit")
-    List<Voucher> findAvailableVouchers(@Param("cinemaItemId") Long cinemaItemId, 
-                                        @Param("now") LocalDateTime now);
+    List<Voucher> findAvailableVouchers(@Param("now") LocalDateTime now);
 
-    List<Voucher> findByCinemaItem_Id(Long cinemaItemId);
 
-    List<Voucher> findByCinemaItemIsNull();
 }

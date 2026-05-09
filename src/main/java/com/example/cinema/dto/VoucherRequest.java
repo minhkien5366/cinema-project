@@ -39,6 +39,5 @@ public class VoucherRequest {
     @NotNull(message = "Ngày hết hạn không được để trống!")
     private LocalDateTime endDate;
 
-    private Long cinemaItemId; // NULL = Global (Super Admin), có ID = Theo rạp (Admin)
     private Long promotionId;
 }
