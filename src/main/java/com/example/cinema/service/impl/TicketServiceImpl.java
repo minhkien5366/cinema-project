@@ -24,34 +24,51 @@ public class TicketServiceImpl implements TicketService {
     private final ShowtimeRepository showtimeRepository;
     private final UserRepository userRepository;
 
-    @Override
-    @Transactional
-    public Ticket createTicket(TicketRequest request) {
-        Seat seat = seatRepository.findById(request.getSeatId())
-                .orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
-        Showtime showtime = showtimeRepository.findById(request.getShowtimeId())
-                .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
-        
-        List<String> busyStatuses = Arrays.asList("BOOKED", "PAID");
-        if (ticketRepository.existsBySeatAndShowtimeAndStatusIn(seat, showtime, busyStatuses)) {
-            throw new RuntimeException("Ghế " + seat.getName() + " đã có người đặt!");
-        }
+@Override
+@Transactional
+public Ticket createTicket(TicketRequest request) {
 
-        User user = getCurrentUser();
+    Seat seat = seatRepository.findById(request.getSeatId())
+            .orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
 
-        Ticket ticket = new Ticket();
-        ticket.setSeat(seat);
-        ticket.setShowtime(showtime);
-        ticket.setUser(user);
-        ticket.setPrice(seat.getPrice());
-        ticket.setStatus("BOOKED");
-        
-        String bookingCode = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
-        ticket.setBookingCode(bookingCode);
+    Showtime showtime = showtimeRepository.findById(request.getShowtimeId())
+            .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
 
-        return ticketRepository.save(ticket);
+    // check ghế đã đặt chưa
+    List<String> busyStatuses = Arrays.asList("BOOKED", "PAID");
+
+    if (ticketRepository.existsBySeatAndShowtimeAndStatusIn(seat, showtime, busyStatuses)) {
+        throw new RuntimeException("Ghế " + seat.getName() + " đã có người đặt!");
     }
 
+    User user = getCurrentUser();
+
+    Ticket ticket = new Ticket();
+
+    // ====== RELATION ======
+    ticket.setSeat(seat);
+    ticket.setShowtime(showtime);
+    ticket.setUser(user);
+
+    // ====== SNAPSHOT GHẾ (QUAN TRỌNG) ======
+    ticket.setSeatRow(seat.getSeatRow());
+    ticket.setSeatNumber(seat.getSeatNumber());
+    ticket.setSeatName(seat.getName());
+
+    // ====== DATA ======
+    ticket.setPrice(seat.getPrice());
+    ticket.setStatus("BOOKED");
+
+    String bookingCode = UUID.randomUUID()
+            .toString()
+            .replace("-", "")
+            .substring(0, 8)
+            .toUpperCase();
+
+    ticket.setBookingCode(bookingCode);
+
+    return ticketRepository.save(ticket);
+}
     @Override
     public List<Ticket> getMyTickets() {
         return ticketRepository.findByUserEmailOrderByCreatedAtDesc(getCurrentUser().getEmail());

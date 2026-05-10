@@ -29,6 +29,15 @@ public class RoomController { // Đã sửa từ OrderController thành RoomCont
                 .build());
     }
 
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<Room>> getRoomById(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.<Room>builder()
+                .status(200)
+                .message("Lấy thông tin phòng thành công")
+                .data(roomService.getRoomById(id))
+                .build());
+    }
     // Endpoint dành cho người dùng xem phòng theo rạp (Ví dụ khi chọn suất chiếu)
     @GetMapping("/cinema-item/{cinemaItemId}")
     public ResponseEntity<ApiResponse<List<Room>>> getRoomsByCinemaItem(@PathVariable Long cinemaItemId) {

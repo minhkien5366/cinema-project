@@ -5,12 +5,14 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "rooms")
 @Data
-@Builder // Hỗ trợ tạo Object nhanh trong Service
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class Room {
@@ -24,10 +26,17 @@ public class Room {
 
     private Integer totalSeats;
 
-    @ManyToOne(fetch = FetchType.EAGER) // EAGER để lấy luôn thông tin rạp khi gọi phòng
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "cinema_item_id")
-    @JsonIgnoreProperties("rooms") // Ngăn vòng lặp JSON nếu CinemaItem cũng chứa danh sách Room
+    @JsonIgnoreProperties("rooms")
     private CinemaItem cinemaItem;
+    @OneToMany(
+            mappedBy = "room",
+            cascade = CascadeType.ALL,
+            orphanRemoval = true
+    )
+    @JsonIgnoreProperties("room")
+    private List<Seat> seats;
 
     @CreationTimestamp
     @Column(updatable = false)

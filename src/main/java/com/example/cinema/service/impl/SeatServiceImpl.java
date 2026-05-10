@@ -10,9 +10,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -21,138 +19,148 @@ public class SeatServiceImpl implements SeatService {
 
     private final SeatRepository seatRepository;
     private final RoomRepository roomRepository;
-    private final ShowtimeRepository showtimeRepository; 
-    private final TicketRepository ticketRepository;     
+    private final ShowtimeRepository showtimeRepository;
+    private final TicketRepository ticketRepository;
     private final UserRepository userRepository;
 
+    // ================= PRICE =================
     private static final double PRICE_NORMAL = 80000.0;
     private static final double PRICE_VIP = 120000.0;
-    private static final double PRICE_COUPLE = 250000.0;
+    private static final double PRICE_SWEETBOX = 250000.0;
 
+    // ================= SHOWTIME =================
     @Override
     public List<Seat> getSeatsByShowtime(Long showtimeId) {
+
         Showtime showtime = showtimeRepository.findById(showtimeId)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy suất chiếu ID: " + showtimeId));
-        
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy suất chiếu"));
+
         if (showtime.getRoom() == null) return new ArrayList<>();
 
-        List<Seat> allSeatsInRoom = seatRepository.findByRoomId(showtime.getRoom().getId());
+        List<Seat> seats = seatRepository.findByRoomId(showtime.getRoom().getId());
         List<Ticket> tickets = ticketRepository.findByShowtimeId(showtimeId);
-        
-        Set<Long> occupiedSeatIds = tickets.stream()
-                .filter(t -> !"CANCELLED".equals(t.getStatus()))
+
+        Set<Long> occupied = tickets.stream()
+                .filter(t -> !"CANCELLED".equalsIgnoreCase(t.getStatus()))
                 .map(t -> t.getSeat().getId())
                 .collect(Collectors.toSet());
 
-        for (Seat seat : allSeatsInRoom) {
-            seat.setStatus(occupiedSeatIds.contains(seat.getId()) ? "OCCUPIED" : "AVAILABLE");
+        for (Seat s : seats) {
+            s.setStatus(occupied.contains(s.getId()) ? "OCCUPIED" : "AVAILABLE");
         }
-        return allSeatsInRoom;
+
+        return seats;
     }
 
+    // ================= AUTO GENERATE =================
     @Override
     @Transactional
     public List<Seat> generateSeatsForRoom(Long roomId, int numRows, int seatsPerRow) {
-        validateRoomAccess(roomId); 
-        
+
+        validateRoomAccess(roomId);
+
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
 
-        int totalToGenerate = numRows * seatsPerRow;
-        if (totalToGenerate > room.getTotalSeats()) {
-            throw new RuntimeException("Số ghế tạo ra (" + totalToGenerate + 
-                ") vượt quá sức chứa của phòng (" + room.getTotalSeats() + ")");
+        int total = numRows * seatsPerRow;
+
+        if (total > room.getTotalSeats()) {
+            throw new RuntimeException("Vượt quá sức chứa phòng");
         }
 
-        if (ticketRepository.existsBySeat_Room_Id(roomId)) {
-            throw new RuntimeException("Không thể reset sơ đồ vì phòng này đã có lịch sử đặt vé!");
-        }
-
+        // ⚠️ FIX: chỉ xoá ghế, không check ticket toàn phòng
         seatRepository.deleteByRoomId(roomId);
-        
+
         List<Seat> seats = new ArrayList<>();
-        char rowLabel = 'A';
+        char row = 'A';
 
         for (int i = 0; i < numRows; i++) {
             for (int j = 1; j <= seatsPerRow; j++) {
+
                 Seat seat = new Seat();
                 seat.setRoom(room);
-                seat.setSeatRow(String.valueOf(rowLabel));
+                seat.setSeatRow(String.valueOf(row));
                 seat.setSeatNumber(String.valueOf(j));
-                seat.setName(rowLabel + String.valueOf(j)); 
+                seat.setName(row + String.valueOf(j));
                 seat.setStatus("AVAILABLE");
 
-                // Phân loại ghế tự động
-                if (i == numRows - 1) { 
-                    seat.setSeatType("COUPLE");
-                    seat.setPrice(PRICE_COUPLE);
-                } else if (i >= 2 && i <= numRows - 3) { 
-                    seat.setSeatType("VIP");
-                    seat.setPrice(PRICE_VIP);
-                } else { 
-                    seat.setSeatType("NORMAL");
-                    seat.setPrice(PRICE_NORMAL);
-                }
+                seat.setSeatType("NORMAL");
+                seat.setPrice(PRICE_NORMAL);
+
                 seats.add(seat);
             }
-            rowLabel++;
+            row++;
         }
+
         return seatRepository.saveAll(seats);
     }
 
+    // ================= CREATE =================
     @Override
     @Transactional
     public Seat createSeat(SeatRequest request) {
+
         validateRoomAccess(request.getRoomId());
-        
+
         Room room = roomRepository.findById(request.getRoomId())
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
 
-        // KIỂM TRA: Sức chứa trước khi thêm ghế lẻ
-        long currentSeatCount = seatRepository.countByRoomId(room.getId());
-        if (currentSeatCount >= room.getTotalSeats()) {
-            throw new RuntimeException("Không thể thêm ghế. Phòng đã đạt giới hạn tối đa " + room.getTotalSeats() + " ghế.");
+        long count = seatRepository.countByRoomId(room.getId());
+
+        if (count >= room.getTotalSeats()) {
+            throw new RuntimeException("Phòng đã đầy");
         }
 
         Seat seat = new Seat();
+        seat.setRoom(room);
         seat.setStatus("AVAILABLE");
+
         mapRequestToEntity(request, seat, room);
+
         return seatRepository.save(seat);
     }
 
+    // ================= UPDATE =================
     @Override
     @Transactional
     public Seat updateSeat(Long id, SeatRequest request) {
+
         Seat seat = seatRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy ghế"));
-        
+
         validateRoomAccess(seat.getRoom().getId());
 
         Room room = roomRepository.findById(request.getRoomId())
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
 
         mapRequestToEntity(request, seat, room);
-        if (request.getStatus() != null) seat.setStatus(request.getStatus());
-        
+
+        if (request.getStatus() != null) {
+            seat.setStatus(request.getStatus());
+        }
+
         return seatRepository.save(seat);
     }
 
+    // ================= DELETE =================
     @Override
     @Transactional
     public void deleteSeat(Long id) {
+
         Seat seat = seatRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
-        
+
         validateRoomAccess(seat.getRoom().getId());
 
-        // KIỂM TRA: Ràng buộc khóa ngoại (Vé)
+        // FIX: check đúng ghế này có vé hay không
         if (ticketRepository.existsBySeatId(id)) {
-            throw new RuntimeException("Không thể xóa ghế vì đã có lịch sử đặt vé liên quan.");
+            throw new RuntimeException("Ghế đã có vé, không thể xóa");
         }
 
         seatRepository.deleteById(id);
     }
 
+    // ================= ROOM =================
     @Override
     public List<Seat> getSeatsByRoom(Long roomId) {
         validateRoomAccess(roomId);
@@ -169,33 +177,39 @@ public class SeatServiceImpl implements SeatService {
     @Override
     @Transactional
     public void deleteSeatsByRoom(Long roomId) {
+
         validateRoomAccess(roomId);
-        if (ticketRepository.existsBySeat_Room_Id(roomId)) {
-            throw new RuntimeException("Không thể xóa danh sách ghế vì phòng đã có vé được bán!");
-        }
+
         seatRepository.deleteByRoomId(roomId);
     }
 
-    // --- HELPER METHODS ---
-
+    // ================= MAPPER =================
     private void mapRequestToEntity(SeatRequest request, Seat seat, Room room) {
+
         seat.setSeatRow(request.getSeatRow());
         seat.setSeatNumber(String.valueOf(request.getSeatNumber()));
         seat.setName(request.getSeatRow() + request.getSeatNumber());
-        seat.setSeatType(request.getSeatType().toUpperCase());
         seat.setRoom(room);
 
-        if (request.getPrice() != null && request.getPrice() > 0) {
-            seat.setPrice(request.getPrice());
-        } else {
-            switch (request.getSeatType().toUpperCase()) {
-                case "VIP": seat.setPrice(PRICE_VIP); break;
-                case "COUPLE": seat.setPrice(PRICE_COUPLE); break;
-                default: seat.setPrice(PRICE_NORMAL); break;
-            }
+        String type = request.getSeatType();
+        if (type == null) type = "NORMAL";
+
+        type = type.toUpperCase();
+        seat.setSeatType(type);
+
+        switch (type) {
+            case "VIP":
+                seat.setPrice(PRICE_VIP);
+                break;
+            case "SWEETBOX":
+                seat.setPrice(PRICE_SWEETBOX);
+                break;
+            default:
+                seat.setPrice(PRICE_NORMAL);
         }
     }
 
+    // ================= USER =================
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         return userRepository.findByEmail(email)
@@ -204,8 +218,7 @@ public class SeatServiceImpl implements SeatService {
 
     private boolean isSuperAdmin(User user) {
         return user.getRoles().stream()
-                .anyMatch(r -> r.getRoleName().equalsIgnoreCase("SUPER_ADMIN") 
-                            || r.getRoleName().equalsIgnoreCase("ROLE_SUPER_ADMIN"));
+                .anyMatch(r -> r.getRoleName().toUpperCase().contains("ADMIN"));
     }
 
     private void validateRoomAccess(Long roomId) {
@@ -213,10 +226,11 @@ public class SeatServiceImpl implements SeatService {
         if (isSuperAdmin(user)) return;
 
         Room room = roomRepository.findById(roomId)
-                .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại ID: " + roomId));
+                .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
 
-        if (room.getCinemaItem() == null || !room.getCinemaItem().getId().equals(user.getManagedCinemaItemId())) {
-            throw new RuntimeException("Bạn không có quyền quản lý ghế tại chi nhánh rạp này!");
+        if (room.getCinemaItem() == null ||
+                !room.getCinemaItem().getId().equals(user.getManagedCinemaItemId())) {
+            throw new RuntimeException("Không có quyền truy cập");
         }
     }
 }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+
 import java.time.LocalDateTime;
 
 @Entity
@@ -13,26 +14,56 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Ticket {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    
+
     private Double price;
-    private String status; // BOOKED, PAID, CANCELLED
+
+    // BOOKED | PAID | CANCELLED
+    private String status;
+
     private String bookingCode;
 
-    @ManyToOne 
-    @JoinColumn(name = "seat_id") 
-    @JsonIgnoreProperties("room")
+    /*
+     * IMPORTANT:
+     * Seat có thể bị xóa nhưng vé phải còn
+     * => ON DELETE SET NULL
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+            name = "seat_id",
+            nullable = true,
+            foreignKey = @ForeignKey(
+                    foreignKeyDefinition =
+                            "FOREIGN KEY (seat_id) REFERENCES seats(id) ON DELETE SET NULL"
+            )
+    )
+    @JsonIgnoreProperties({"room"})
     private Seat seat;
 
-    @ManyToOne 
-    @JoinColumn(name = "showtime_id") 
+    /*
+     * Snapshot dữ liệu ghế
+     * Giữ lịch sử khi seat bị xóa
+     */
+    private String seatRow;
+    private String seatNumber;
+    private String seatName;
+
+    /*
+     * Showtime
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "showtime_id")
     @JsonIgnoreProperties({"cinemaItem", "room"})
     private Showtime showtime;
 
-    @ManyToOne 
-    @JoinColumn(name = "user_id") 
+    /*
+     * User mua vé
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
     @JsonIgnoreProperties({"password", "roles", "managedCinemaItemId"})
     private User user;
 

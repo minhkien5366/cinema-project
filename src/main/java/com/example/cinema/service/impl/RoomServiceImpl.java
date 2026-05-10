@@ -3,10 +3,15 @@ package com.example.cinema.service.impl;
 import com.example.cinema.dto.RoomRequest;
 import com.example.cinema.entity.CinemaItem;
 import com.example.cinema.entity.Room;
+import com.example.cinema.entity.Seat;
+import com.example.cinema.entity.Showtime;
 import com.example.cinema.entity.User;
 import com.example.cinema.exception.ResourceNotFoundException;
 import com.example.cinema.repository.CinemaItemRepository;
 import com.example.cinema.repository.RoomRepository;
+import com.example.cinema.repository.SeatRepository;
+import com.example.cinema.repository.ShowtimeRepository;
+import com.example.cinema.repository.TicketRepository;
 import com.example.cinema.repository.UserRepository;
 import com.example.cinema.service.RoomService;
 import lombok.RequiredArgsConstructor;
@@ -14,16 +19,18 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
 @RequiredArgsConstructor
 public class RoomServiceImpl implements RoomService {
-
     private final RoomRepository roomRepository;
     private final CinemaItemRepository cinemaItemRepository;
     private final UserRepository userRepository;
-
+    private final SeatRepository seatRepository;
+    private final TicketRepository ticketRepository;
+    private final ShowtimeRepository showtimeRepository;
     @Override
     public List<Room> getAllRooms() {
         User currentUser = getCurrentUser();
@@ -89,19 +96,36 @@ public class RoomServiceImpl implements RoomService {
         return roomRepository.save(room);
     }
 
+
     @Override
     @Transactional
     public void deleteRoom(Long id) {
         Room room = roomRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy phòng để xóa"));
-        
-        // Kiểm tra quyền: Phải là Admin của rạp chứa phòng này mới được xóa
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Không tìm thấy phòng"));
         validateAdminPermission(room.getCinemaItem().getId());
-        
-        roomRepository.deleteById(id);
-    }
+        // 1. check suất chiếu tương lai
+        boolean hasFutureShowtime =
+                showtimeRepository.existsByRoomIdAndEndTimeAfter(
+                        id,
+                        LocalDateTime.now()
+                );
+        if (hasFutureShowtime) {
+            throw new RuntimeException(
+                    "Không thể xóa phòng vì vẫn còn suất chiếu chưa diễn ra!"
+            );
+        }
+        // 2. detach showtime (giữ lịch sử)
+        List<Showtime> showtimes =
+                showtimeRepository.findByRoomId(id);
+        for (Showtime s : showtimes) {
+            s.setRoom(null);
+        }
+        showtimeRepository.saveAll(showtimes);
+        // 3. delete room (seats cascade nếu mapping đúng)
+        roomRepository.delete(room);
+    } 
 
-    // --- HELPER METHODS ---
 
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();

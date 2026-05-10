@@ -37,7 +37,15 @@ boolean existsByUser_UserIdAndShowtime_Movie_IdAndStatusAndShowtime_EndTimeBefor
     Long userId, Long movieId, String status, java.time.LocalDateTime now);
     // --- THÊM MỚI: Tìm vé để cập nhật trạng thái khi thanh toán/hủy đơn ---
     Optional<Ticket> findBySeatIdAndShowtimeId(Long seatId, Long showtimeId);
-
+    boolean existsBySeatIdAndStatusIn(Long seatId, List<String> statuses);
     @Query("SELECT t.seat FROM Ticket t WHERE t.showtime.id = :showtimeId AND t.status IN ('BOOKED', 'PAID')")
     List<Seat> findOccupiedSeatsByShowtimeId(@Param("showtimeId") Long showtimeId);
+    long countBySeat_Id(Long seatId);
+    @Query("""
+    SELECT COUNT(t)
+    FROM Ticket t
+    WHERE t.seat.id = :seatId
+    AND t.status <> 'CANCELLED'
+""")
+long countActiveBySeatId(@Param("seatId") Long seatId);
 }
