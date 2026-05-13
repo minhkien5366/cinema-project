@@ -6,6 +6,8 @@ import java.util.Optional;
 
 public interface SeatPriceConfigRepository extends JpaRepository<SeatPriceConfig, Long> {
     // Tìm giá theo: Loại ghế + Thứ + Rạp
-    Optional<SeatPriceConfig> findBySeatTypeAndDayOfWeekAndCinemaItem_Id(
-        String seatType, Integer dayOfWeek, Long cinemaItemId);
+    Optional<SeatPriceConfig> findBySeatTypeAndDayOfWeek(
+            String seatType,
+            Integer dayOfWeek
+    );
 }

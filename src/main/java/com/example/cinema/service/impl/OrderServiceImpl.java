@@ -62,8 +62,11 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Suất chiếu này đã diễn ra, không thể đặt vé!");
         }
 
-        int dayValue = showtime.getStartTime().getDayOfWeek().getValue() + 1;
-        if (dayValue > 8) dayValue = 2; 
+        int javaDay = showtime.getStartTime()
+        .getDayOfWeek()
+        .getValue();
+
+        int dayValue = (javaDay == 7) ? 8 : javaDay + 1;
 
         Order order = new Order();
         order.setUser(user);
@@ -83,9 +86,12 @@ public class OrderServiceImpl implements OrderService {
                 }
 
                 Double dynamicPrice = seatPriceConfigRepository
-                    .findBySeatTypeAndDayOfWeekAndCinemaItem_Id(seat.getSeatType().toUpperCase(), dayValue, showtime.getCinemaItem().getId())
+                    .findBySeatTypeAndDayOfWeek(
+                        seat.getSeatType().toUpperCase(),
+                        dayValue
+                    )
                     .map(SeatPriceConfig::getPrice)
-                    .orElse(seat.getPrice()); 
+                    .orElse(seat.getPrice());
 
                 Ticket ticket = Ticket.builder()
                     .seat(seat).showtime(showtime).user(user).price(dynamicPrice)

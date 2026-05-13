@@ -2,10 +2,8 @@ package com.example.cinema.service.impl;
 
 import com.example.cinema.dto.SeatPriceConfigRequest;
 import com.example.cinema.entity.SeatPriceConfig;
-import com.example.cinema.entity.CinemaItem;
 import com.example.cinema.exception.ResourceNotFoundException;
 import com.example.cinema.repository.SeatPriceConfigRepository;
-import com.example.cinema.repository.CinemaItemRepository;
 import com.example.cinema.service.SeatPriceConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -18,7 +16,6 @@ import java.util.List;
 public class SeatPriceConfigServiceImpl implements SeatPriceConfigService {
 
     private final SeatPriceConfigRepository repository;
-    private final CinemaItemRepository cinemaItemRepository;
 
     @Override
     public List<SeatPriceConfig> getAllConfigs() {
@@ -28,23 +25,19 @@ public class SeatPriceConfigServiceImpl implements SeatPriceConfigService {
     @Override
     @Transactional
     public SeatPriceConfig createConfig(SeatPriceConfigRequest request) {
-        // Kiểm tra xem cấu hình cho loại ghế/thứ này tại rạp này đã có chưa
-        repository.findBySeatTypeAndDayOfWeekAndCinemaItem_Id(
-                request.getSeatType().toUpperCase(), 
-                request.getDayOfWeek(), 
-                request.getCinemaItemId()
-        ).ifPresent(c -> {
-            throw new RuntimeException("Cấu hình giá cho loại ghế này vào ngày này đã tồn tại!");
-        });
 
-        CinemaItem cinemaItem = cinemaItemRepository.findById(request.getCinemaItemId())
-                .orElseThrow(() -> new ResourceNotFoundException("Rạp không tồn tại"));
+        // ✅ kiểm tra trùng cấu hình (GHẾ + NGÀY)
+        repository.findBySeatTypeAndDayOfWeek(
+                request.getSeatType().toUpperCase(),
+                request.getDayOfWeek()
+        ).ifPresent(c -> {
+            throw new RuntimeException("Cấu hình giá cho loại ghế và ngày này đã tồn tại!");
+        });
 
         SeatPriceConfig config = SeatPriceConfig.builder()
                 .seatType(request.getSeatType().toUpperCase())
                 .dayOfWeek(request.getDayOfWeek())
                 .price(request.getPrice())
-                .cinemaItem(cinemaItem)
                 .build();
 
         return repository.save(config);
@@ -53,13 +46,25 @@ public class SeatPriceConfigServiceImpl implements SeatPriceConfigService {
     @Override
     @Transactional
     public SeatPriceConfig updateConfig(Long id, SeatPriceConfigRequest request) {
-        SeatPriceConfig config = repository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy cấu hình giá"));
 
-        config.setPrice(request.getPrice());
+        SeatPriceConfig config = repository.findById(id)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Không tìm thấy cấu hình giá"));
+
+        // ✅ check duplicate khi update (PRO FIX)
+        repository.findBySeatTypeAndDayOfWeek(
+                request.getSeatType().toUpperCase(),
+                request.getDayOfWeek()
+        ).ifPresent(existing -> {
+            if (!existing.getId().equals(id)) {
+                throw new RuntimeException("Cấu hình giá đã tồn tại!");
+            }
+        });
+
         config.setSeatType(request.getSeatType().toUpperCase());
         config.setDayOfWeek(request.getDayOfWeek());
-        
+        config.setPrice(request.getPrice());
+
         return repository.save(config);
     }
 

@@ -17,8 +17,4 @@ public class SeatPriceConfig {
     private String seatType; // NORMAL, VIP, COUPLE
     private Integer dayOfWeek; // 2 = Thứ 2, ..., 8 = Chủ Nhật
     private Double price;
-
-    @ManyToOne
-    @JoinColumn(name = "cinema_item_id")
-    private CinemaItem cinemaItem; 
 }
