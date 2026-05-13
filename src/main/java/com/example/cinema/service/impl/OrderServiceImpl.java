@@ -4,18 +4,23 @@ import com.example.cinema.dto.*;
 import com.example.cinema.entity.*;
 import com.example.cinema.exception.ResourceNotFoundException;
 import com.example.cinema.repository.*;
+import com.example.cinema.service.MailService;
 import com.example.cinema.service.OrderService;
 import com.example.cinema.service.VoucherService;
+import com.example.cinema.util.VNPayUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Sort;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,6 +37,19 @@ public class OrderServiceImpl implements OrderService {
     private final VoucherRepository voucherRepository;
     private final VoucherService voucherService;
     private final SeatPriceConfigRepository seatPriceConfigRepository; 
+    
+    // TIÊM THÊM DỊCH VỤ MAIL VÀ WEBSOCKET
+    private final MailService mailService;
+    private final SimpMessagingTemplate messagingTemplate;
+
+    @Value("${vnpay.url:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}")
+    private String vnp_PayUrl;
+    @Value("${vnpay.tmnCode:2QXUI6Q7}")
+    private String vnp_TmnCode;
+    @Value("${vnpay.hashSecret:QTZTTGZMCYALZMMYVOTZMMZLXUKYVMLM}")
+    private String vnp_HashSecret;
+    @Value("${vnpay.returnUrl:http://localhost:8080/api/v1/orders/vnpay-callback}")
+    private String vnp_ReturnUrl;
 
     @Override
     @Transactional
@@ -40,12 +58,10 @@ public class OrderServiceImpl implements OrderService {
         Showtime showtime = showtimeRepository.findById(request.getShowtimeId())
                 .orElseThrow(() -> new ResourceNotFoundException("Suất chiếu không tồn tại"));
 
-        // RÀNG BUỘC 1: Chặn đặt vé nếu suất chiếu đã bắt đầu hoặc kết thúc
         if (showtime.getStartTime().isBefore(LocalDateTime.now())) {
-            throw new RuntimeException("Suất chiếu này đã diễn ra hoặc đã bắt đầu, không thể đặt vé!");
+            throw new RuntimeException("Suất chiếu này đã diễn ra, không thể đặt vé!");
         }
 
-        // TÍNH TOÁN THỨ TRONG TUẦN (Mapping: 2 = Thứ 2, ..., 8 = Chủ Nhật)
         int dayValue = showtime.getStartTime().getDayOfWeek().getValue() + 1;
         if (dayValue > 8) dayValue = 2; 
 
@@ -59,61 +75,41 @@ public class OrderServiceImpl implements OrderService {
         double total = 0.0;
         List<OrderDetail> details = new ArrayList<>();
 
-        // XỬ LÝ VÉ (TÍNH GIÁ ĐỘNG)
         if (request.getSeatIds() != null) {
             for (Long seatId : request.getSeatIds()) {
                 Seat seat = seatRepository.findById(seatId).orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
-                
                 if (ticketRepository.existsBySeatAndShowtime(seat, showtime)) {
                     throw new RuntimeException("Ghế " + seat.getName() + " đã có người đặt!");
                 }
 
-                // TRA CỨU GIÁ THEO THỨ + LOẠI GHẾ + RẠP
                 Double dynamicPrice = seatPriceConfigRepository
-                    .findBySeatTypeAndDayOfWeekAndCinemaItem_Id(
-                        seat.getSeatType().toUpperCase(), 
-                        dayValue, 
-                        showtime.getCinemaItem().getId()
-                    )
+                    .findBySeatTypeAndDayOfWeekAndCinemaItem_Id(seat.getSeatType().toUpperCase(), dayValue, showtime.getCinemaItem().getId())
                     .map(SeatPriceConfig::getPrice)
                     .orElse(seat.getPrice()); 
 
-                Ticket ticket = new Ticket();
-                ticket.setSeat(seat);
-                ticket.setShowtime(showtime);
-                ticket.setUser(user);
-                ticket.setPrice(dynamicPrice);
-                ticket.setStatus("BOOKED");
-                ticket.setBookingCode(UUID.randomUUID().toString().substring(0, 8).toUpperCase());
+                Ticket ticket = Ticket.builder()
+                    .seat(seat).showtime(showtime).user(user).price(dynamicPrice)
+                    .status("BOOKED").bookingCode(UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                    .build();
                 ticketRepository.save(ticket);
 
                 OrderDetail d = new OrderDetail();
-                d.setOrder(savedOrder);
-                d.setItemType("TICKET");
-                d.setItemId(seatId);
-                d.setQuantity(1);
-                d.setPrice(dynamicPrice);
+                d.setOrder(savedOrder); d.setItemType("TICKET"); d.setItemId(seatId); d.setQuantity(1); d.setPrice(dynamicPrice);
                 details.add(d);
                 total += dynamicPrice;
             }
         }
 
-        // XỬ LÝ COMBO
         if (request.getCombos() != null) {
             for (OrderRequest.ComboOrderDTO cReq : request.getCombos()) {
                 Combo combo = comboRepository.findById(cReq.getComboId()).orElseThrow(() -> new ResourceNotFoundException("Combo không tồn tại"));
                 OrderDetail d = new OrderDetail();
-                d.setOrder(savedOrder);
-                d.setItemType("COMBO");
-                d.setItemId(cReq.getComboId());
-                d.setQuantity(cReq.getQuantity());
-                d.setPrice(combo.getPrice());
+                d.setOrder(savedOrder); d.setItemType("COMBO"); d.setItemId(cReq.getComboId()); d.setQuantity(cReq.getQuantity()); d.setPrice(combo.getPrice());
                 details.add(d);
                 total += (combo.getPrice() * cReq.getQuantity());
             }
         }
 
-        // XỬ LÝ VOUCHER
         if (request.getVoucherCode() != null && !request.getVoucherCode().trim().isEmpty()) {
             Voucher voucher = voucherService.validateAndGetVoucher(request.getVoucherCode(), showtime.getCinemaItem().getId(), total);
             total = Math.max(0.0, total - voucher.getDiscountValue());
@@ -125,67 +121,125 @@ public class OrderServiceImpl implements OrderService {
         orderDetailRepository.saveAll(details);
         savedOrder.setOrderDetails(details);
         
-        return mapToResponse(orderRepository.save(savedOrder));
+        OrderResponse response = mapToResponse(orderRepository.save(savedOrder));
+
+        if ("VNPAY".equalsIgnoreCase(request.getPaymentMethod())) {
+            response.setPaymentUrl(generateVNPayUrl(savedOrder));
+        }
+
+        return response;
+    }
+
+    private String generateVNPayUrl(Order order) {
+        long amount = (long) (order.getTotalAmount() * 100);
+        Map<String, String> vnp_Params = new TreeMap<>();
+        vnp_Params.put("vnp_Version", "2.1.0");
+        vnp_Params.put("vnp_Command", "pay");
+        vnp_Params.put("vnp_TmnCode", vnp_TmnCode);
+        vnp_Params.put("vnp_Amount", String.valueOf(amount));
+        vnp_Params.put("vnp_CurrCode", "VND");
+        vnp_Params.put("vnp_TxnRef", String.valueOf(order.getId()));
+        vnp_Params.put("vnp_OrderInfo", "Thanh toan don hang: " + order.getId());
+        vnp_Params.put("vnp_OrderType", "other");
+        vnp_Params.put("vnp_Locale", "vn");
+        vnp_Params.put("vnp_ReturnUrl", vnp_ReturnUrl);
+        vnp_Params.put("vnp_IpAddr", "127.0.0.1");
+
+        LocalDateTime now = LocalDateTime.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+        vnp_Params.put("vnp_CreateDate", now.format(formatter));
+
+        StringBuilder hashData = new StringBuilder();
+        StringBuilder query = new StringBuilder();
+        Iterator<Map.Entry<String, String>> itr = vnp_Params.entrySet().iterator();
+        while (itr.hasNext()) {
+            Map.Entry<String, String> entry = itr.next();
+            String fieldName = entry.getKey();
+            String fieldValue = entry.getValue();
+            if ((fieldValue != null) && (fieldValue.length() > 0)) {
+                hashData.append(fieldName).append('=').append(URLEncoder.encode(fieldValue, StandardCharsets.UTF_8));
+                query.append(URLEncoder.encode(fieldName, StandardCharsets.UTF_8)).append('=').append(URLEncoder.encode(fieldValue, StandardCharsets.UTF_8));
+                if (itr.hasNext()) {
+                    query.append('&');
+                    hashData.append('&');
+                }
+            }
+        }
+        
+        String queryUrl = query.toString();
+        String vnp_SecureHash = VNPayUtils.hmacSHA512(vnp_HashSecret, hashData.toString());
+        
+        return vnp_PayUrl + "?" + queryUrl + "&vnp_SecureHash=" + vnp_SecureHash;
     }
 
     @Override
     @Transactional
     public OrderResponse updateOrderStatus(Long orderId, String newStatus) {
         Order order = orderRepository.findById(orderId).orElseThrow(() -> new ResourceNotFoundException("Đơn hàng không tồn tại"));
-        validateAdminAccess(order.getCinemaItem().getId());
-
+        
         String status = newStatus.toUpperCase();
         order.setStatus(status);
 
         if (order.getOrderDetails() != null) {
             for (OrderDetail d : order.getOrderDetails()) {
                 if ("TICKET".equals(d.getItemType())) {
-                    ticketRepository.findBySeatIdAndShowtimeId(
-                        d.getItemId(), 
-                        orderRepository.findShowtimeIdByOrderId(order.getId())
-                    ).ifPresent(t -> {
-                        t.setStatus(status.equals("PAID") ? "PAID" : "CANCELLED");
-                        ticketRepository.save(t);
-                    });
+                    ticketRepository.findBySeatIdAndShowtimeId(d.getItemId(), orderRepository.findShowtimeIdByOrderId(order.getId()))
+                        .ifPresent(t -> {
+                            t.setStatus(status.equals("PAID") ? "PAID" : "CANCELLED");
+                            ticketRepository.save(t);
+                        });
                 }
             }
         }
-        return mapToResponse(orderRepository.save(order));
+        
+        Order savedOrder = orderRepository.save(order);
+        
+        // KHI THANH TOÁN THÀNH CÔNG (PAID)
+        if ("PAID".equals(status)) {
+            // 1. Gửi Email chi tiết đơn hàng (Chạy qua MailServiceImpl @Async)
+            mailService.sendOrderConfirmation(savedOrder);
+
+            // 2. Bắn thông báo Real-time cho Admin
+            Map<String, Object> adminNotify = new HashMap<>();
+            adminNotify.put("message", "Có đơn hàng mới!");
+            adminNotify.put("orderId", savedOrder.getId());
+            adminNotify.put("customer", savedOrder.getUser().getFirstName() + " " + savedOrder.getUser().getLastName());
+            adminNotify.put("total", savedOrder.getTotalAmount());
+            
+// Ép kiểu String cho tham số đầu tiên và Object cho tham số thứ hai
+            messagingTemplate.convertAndSend((String) "/topic/admin-notifications", (Object) adminNotify);        }
+
+        return mapToResponse(savedOrder);
     }
 
-    @Override
-    public List<OrderResponse> getAllOrders() {
+    @Override public List<OrderResponse> getAllOrders() { 
         User user = getCurrentUser();
         Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
         if (isSuperAdmin(user)) return orderRepository.findAll(sort).stream().map(this::mapToResponse).collect(Collectors.toList());
         return orderRepository.findByCinemaItem_Id(user.getManagedCinemaItemId(), sort).stream().map(this::mapToResponse).collect(Collectors.toList());
     }
 
-    @Override
-    public List<OrderResponse> getMyOrders() {
-        return orderRepository.findByUserEmail(getCurrentUser().getEmail(), Sort.by(Sort.Direction.DESC, "createdAt")).stream().map(this::mapToResponse).collect(Collectors.toList());
+    @Override public List<OrderResponse> getMyOrders() { 
+        return orderRepository.findByUserEmail(getCurrentUser().getEmail(), Sort.by(Sort.Direction.DESC, "createdAt")).stream().map(this::mapToResponse).collect(Collectors.toList()); 
     }
 
-    @Override
-    public OrderResponse getOrderById(Long id) {
-        return mapToResponse(orderRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Không thấy đơn hàng")));
+    @Override public OrderResponse getOrderById(Long id) { 
+        return mapToResponse(orderRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Không thấy đơn hàng"))); 
     }
 
-    private User getCurrentUser() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByEmail(email).orElseThrow(() -> new ResourceNotFoundException("Phiên đăng nhập hết hạn"));
+    private User getCurrentUser() { 
+        String email = SecurityContextHolder.getContext().getAuthentication().getName(); 
+        return userRepository.findByEmail(email).orElseThrow(() -> new ResourceNotFoundException("Phiên đăng nhập hết hạn")); 
     }
 
-    private boolean isSuperAdmin(User user) {
-        return user.getRoles().stream().anyMatch(r -> r.getRoleName().equalsIgnoreCase("SUPER_ADMIN") || r.getRoleName().equalsIgnoreCase("ROLE_SUPER_ADMIN"));
+    private boolean isSuperAdmin(User user) { 
+        return user.getRoles().stream().anyMatch(r -> r.getRoleName().equalsIgnoreCase("SUPER_ADMIN")); 
     }
 
-    private void validateAdminAccess(Long cinemaId) {
-        User user = getCurrentUser();
-        if (isSuperAdmin(user)) return;
-        if (user.getManagedCinemaItemId() == null || !user.getManagedCinemaItemId().equals(cinemaId)) {
-            throw new RuntimeException("Bạn không có quyền quản lý đơn hàng của chi nhánh này!");
-        }
+    private void validateAdminAccess(Long cinemaId) { 
+        User user = getCurrentUser(); 
+        if (isSuperAdmin(user)) return; 
+        if (user.getManagedCinemaItemId() == null || !user.getManagedCinemaItemId().equals(cinemaId)) throw new RuntimeException("Không có quyền!"); 
     }
 
     private OrderResponse mapToResponse(Order order) {

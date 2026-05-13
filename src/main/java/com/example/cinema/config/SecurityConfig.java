@@ -46,16 +46,13 @@ public class SecurityConfig {
         http.csrf(csrf -> csrf.disable())
             .cors(Customizer.withDefaults()) 
             .authorizeHttpRequests(authorize -> authorize
-                // 1. Cho phép tất cả request OPTIONS (CORS)
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-
-                // 2. CHO PHÉP SWAGGER (Đưa lên hàng đầu để ưu tiên)
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-
-                // 3. API Auth
                 .requestMatchers("/api/v1/auth/**").permitAll()
 
-                // 4. Các API lấy dữ liệu GET công khai (Dùng wildcard /** cho an toàn)
+                // CẤP QUYỀN CHO VNPAY CALLBACK
+                .requestMatchers("/api/v1/orders/vnpay-callback").permitAll()
+
                 .requestMatchers(HttpMethod.GET, "/api/v1/movies/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/genres/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/cinemas/**").permitAll()
@@ -64,10 +61,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/combos/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/showtimes/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/menus/**").permitAll()
-                // Trong hàm securityFilterChain, Duy thêm dòng này vào trước .anyRequest().authenticated()
                 .requestMatchers("/uploads/**").permitAll()
                 
-                // 5. Mọi request khác bắt buộc Login
                 .anyRequest().authenticated()
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));

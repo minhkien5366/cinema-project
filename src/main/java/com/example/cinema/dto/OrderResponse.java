@@ -17,4 +17,5 @@ public class OrderResponse {
     private Long cinemaItemId;
     private String cinemaName;
     private List<OrderDetailResponse> orderDetails;
+    private String paymentUrl; // <--- THÊM DÒNG NÀY
 }

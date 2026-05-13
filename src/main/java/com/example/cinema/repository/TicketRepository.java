@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -31,11 +32,18 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     boolean existsBySeatAndShowtimeAndStatusIn(Seat seat, Showtime showtime, List<String> statuses);
 
     Optional<Ticket> findBySeatAndShowtimeAndUser(Seat seat, Showtime showtime, User user);
-boolean existsBySeatId(Long seatId);
-boolean existsBySeat_Room_Id(Long roomId);
-boolean existsByUser_UserIdAndShowtime_Movie_IdAndStatusAndShowtime_EndTimeBefore(
-    Long userId, Long movieId, String status, java.time.LocalDateTime now);
-    // --- THÊM MỚI: Tìm vé để cập nhật trạng thái khi thanh toán/hủy đơn ---
+
+    boolean existsBySeatId(Long seatId);
+
+    boolean existsBySeat_Room_Id(Long roomId);
+
+    // --- FIX LỖI 1: Ràng buộc đã xem xong phim ---
+    boolean existsByUser_UserIdAndShowtime_Movie_IdAndStatusAndShowtime_EndTimeBefore(
+        Long userId, Long movieId, String status, LocalDateTime now);
+
+    // --- FIX LỖI 2: Ràng buộc đã thanh toán vé (Dù phim chưa chiếu) ---
+    boolean existsByUser_UserIdAndShowtime_Movie_IdAndStatus(Long userId, Long movieId, String status);
+
     Optional<Ticket> findBySeatIdAndShowtimeId(Long seatId, Long showtimeId);
 
     @Query("SELECT t.seat FROM Ticket t WHERE t.showtime.id = :showtimeId AND t.status IN ('BOOKED', 'PAID')")

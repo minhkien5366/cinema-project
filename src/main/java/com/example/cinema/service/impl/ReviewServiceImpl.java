@@ -29,37 +29,75 @@ public class ReviewServiceImpl implements ReviewService {
         Movie movie = movieRepository.findById(request.getMovieId())
                 .orElseThrow(() -> new ResourceNotFoundException("Phim không tồn tại"));
 
-        // 1. RÀNG BUỘC: Chỉ được đánh giá khi phim đã chiếu xong (EndTime < Hiện tại)
-        boolean hasFinishedWatching = ticketRepository.existsByUser_UserIdAndShowtime_Movie_IdAndStatusAndShowtime_EndTimeBefore(
-                user.getUserId(), 
-                movie.getId(), 
-                "PAID", 
-                LocalDateTime.now()
+        // 1. RÀNG BUỘC: Thang điểm 1-5
+        if (request.getRating() < 1 || request.getRating() > 5) {
+            throw new RuntimeException("Điểm đánh giá phải từ 1 đến 5 sao.");
+        }
+
+        // 2. RÀNG BUỘC: Nội dung tối thiểu 10 ký tự
+        if (request.getComment() == null || request.getComment().trim().length() < 10) {
+            throw new RuntimeException("Nội dung đánh giá phải có ít nhất 10 ký tự.");
+        }
+
+        // 3. RÀNG BUỘC: Chỉ người đã thanh toán (PAID) mới được đánh giá
+        boolean hasPaidTicket = ticketRepository.existsByUser_UserIdAndShowtime_Movie_IdAndStatus(
+                user.getUserId(), movie.getId(), "PAID"
         );
+        if (!hasPaidTicket) {
+            throw new RuntimeException("Bạn cần mua vé để thực hiện đánh giá bộ phim này.");
+        }
 
+        // 4. RÀNG BUỘC: Chỉ đánh giá sau khi suất chiếu kết thúc
+        boolean hasFinishedWatching = ticketRepository.existsByUser_UserIdAndShowtime_Movie_IdAndStatusAndShowtime_EndTimeBefore(
+                user.getUserId(), movie.getId(), "PAID", LocalDateTime.now()
+        );
         if (!hasFinishedWatching) {
-            throw new RuntimeException("Bạn chỉ có thể đánh giá sau khi bộ phim đã kết thúc suất chiếu!");
+            throw new RuntimeException("Vui lòng quay lại đánh giá sau khi bộ phim kết thúc.");
         }
 
-        // 2. RÀNG BUỘC: Check xem đã đánh giá chưa (Sử dụng hàm đã fix tên)
+        // 5. RÀNG BUỘC: Mỗi người chỉ đánh giá 1 phim 1 lần
         if (reviewRepository.existsByUser_UserIdAndMovieId(user.getUserId(), movie.getId())) {
-            throw new RuntimeException("Bạn đã gửi đánh giá cho bộ phim này rồi.");
+            throw new RuntimeException("Bạn đã đánh giá bộ phim này rồi.");
         }
 
-        // 3. LƯU REVIEW
         Review review = Review.builder()
                 .rating(request.getRating())
                 .comment(request.getComment())
                 .user(user)
                 .movie(movie)
+                .createdAt(LocalDateTime.now())
                 .build();
 
         Review savedReview = reviewRepository.save(review);
-
-        // 4. CẬP NHẬT CỘT RATING TRONG BẢNG MOVIE
-        updateMovieRatingCache(movie);
-
+        updateMovieRatingCache(movie); // Cập nhật lại điểm trung bình
         return savedReview;
+    }
+
+    /**
+     * TÍNH NĂNG MỚI: Admin xóa đánh giá không phù hợp
+     */
+    @Override
+    @Transactional
+    public void deleteReview(Long reviewId) {
+        Review review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đánh giá này"));
+
+        User currentUser = getCurrentUser();
+        
+        // Chỉ Admin hoặc chính chủ nhân của review mới có quyền xóa
+        boolean isAdmin = currentUser.getRoles().stream()
+                .anyMatch(r -> r.getRoleName().equals("ADMIN") || r.getRoleName().equals("SUPER_ADMIN"));
+        boolean isOwner = review.getUser().getUserId().equals(currentUser.getUserId());
+
+        if (!isAdmin && !isOwner) {
+            throw new RuntimeException("Bạn không có quyền xóa đánh giá này!");
+        }
+
+        Movie movie = review.getMovie();
+        reviewRepository.delete(review);
+
+        // Sau khi xóa, phải tính lại điểm trung bình cho phim
+        updateMovieRatingCache(movie);
     }
 
     @Override
@@ -67,8 +105,13 @@ public class ReviewServiceImpl implements ReviewService {
         return reviewRepository.findByMovieIdOrderByCreatedAtDesc(movieId);
     }
 
+    /**
+     * Hàm dùng chung để tính toán lại Rating cho phim
+     * Sử dụng công thức: $$Rating_{avg} = \frac{\sum Rating}{Total Reviews}$$
+     */
     private void updateMovieRatingCache(Movie movie) {
         Double avgRating = reviewRepository.getAverageRatingByMovieId(movie.getId());
+        // Làm tròn đến 1 chữ số thập phân
         double roundedRating = (avgRating != null) ? Math.round(avgRating * 10.0) / 10.0 : 0.0;
         movie.setRating(roundedRating);
         movieRepository.save(movie);
@@ -77,6 +120,6 @@ public class ReviewServiceImpl implements ReviewService {
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         return userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("Phiên đăng nhập hết hạn, vui lòng thử lại"));
+                .orElseThrow(() -> new ResourceNotFoundException("Phiên đăng nhập hết hạn"));
     }
 }
