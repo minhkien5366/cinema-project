@@ -30,7 +30,10 @@ public class Showtime {
     private Movie movie;
 
     @ManyToOne
-    @JoinColumn(name = "room_id")
+    @JoinColumn(
+            name = "room_id",
+            nullable = true
+    )
     @JsonIgnoreProperties("showtimes")
     private Room room;
 }

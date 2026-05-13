@@ -30,4 +30,10 @@ public interface ShowtimeRepository extends JpaRepository<Showtime, Long> {
     @Query("SELECT s FROM Showtime s WHERE s.movie.id = :movieId " +
            "AND CAST(s.startTime AS date) = :date")
     List<Showtime> findByMovieIdAndDate(@Param("movieId") Long movieId, @Param("date") LocalDate date);
+boolean existsByRoomIdAndEndTimeAfter(
+        Long roomId,
+        LocalDateTime time
+);
+boolean existsByRoomId(Long roomId);
+
 }

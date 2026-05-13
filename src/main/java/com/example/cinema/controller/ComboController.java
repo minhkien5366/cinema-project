@@ -20,8 +20,11 @@ public class ComboController {
 
     private final ComboService comboService;
 
+    // ================= USER + ADMIN + SUPER ADMIN =================
+
     @GetMapping
     public ResponseEntity<ApiResponse<List<Combo>>> getAll() {
+
         return ResponseEntity.ok(ApiResponse.<List<Combo>>builder()
                 .status(200)
                 .message("Lấy danh sách combo thành công")
@@ -31,18 +34,23 @@ public class ComboController {
 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<Combo>> getById(@PathVariable Long id) {
+
         return ResponseEntity.ok(ApiResponse.<Combo>builder()
                 .status(200)
                 .data(comboService.getComboById(id))
                 .build());
     }
 
+    // ================= SUPER ADMIN ONLY =================
+
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Combo>> create(
             @RequestPart("combo") ComboRequest request,
             @RequestPart(value = "file", required = false) MultipartFile file) {
+
         Combo combo = comboService.createCombo(request, file);
+
         return ResponseEntity.ok(ApiResponse.<Combo>builder()
                 .status(201)
                 .message("Thêm combo thành công")
@@ -51,12 +59,14 @@ public class ComboController {
     }
 
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Combo>> update(
             @PathVariable Long id,
             @RequestPart("combo") ComboRequest request,
             @RequestPart(value = "file", required = false) MultipartFile file) {
+
         Combo combo = comboService.updateCombo(id, request, file);
+
         return ResponseEntity.ok(ApiResponse.<Combo>builder()
                 .status(200)
                 .message("Cập nhật thành công")
@@ -65,9 +75,11 @@ public class ComboController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<String>> delete(@PathVariable Long id) {
+
         comboService.deleteCombo(id);
+
         return ResponseEntity.ok(ApiResponse.<String>builder()
                 .status(200)
                 .message("Xóa combo thành công")
