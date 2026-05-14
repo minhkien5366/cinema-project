@@ -29,26 +29,28 @@ public class MailServiceImpl implements MailService {
             helper.setTo(order.getUser().getEmail());
             helper.setSubject("A&K CINEMA - XÁC NHẬN VÉ XEM PHIM #" + order.getId());
 
-            // Định dạng tiền tệ VND
+            // Định dạng tiền tệ VND chuẩn
             NumberFormat vnFormat = NumberFormat.getCurrencyInstance(new Locale("vi", "VN"));
-            String totalAmount = vnFormat.format(order.getTotalAmount() * 1000); 
+            
+            // FIX: Bỏ nhân 1000 vì giá trị trong DB thường là giá trị thực tế (vd: 75000.0)
+            String totalAmountFormatted = vnFormat.format(order.getTotalAmount()); 
 
-            // Lấy tên khách hàng từ firstName và lastName trong Entity User
+            // Lấy tên khách hàng từ firstName và lastName
             String customerName = order.getUser().getFirstName() + " " + order.getUser().getLastName();
             
             StringBuilder content = new StringBuilder();
             content.append("<div style='font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 20px; overflow: hidden;'>");
             
-            // Header màu đỏ đặc trưng rạp phim
+            // Header
             content.append("<div style='background-color: #dc2626; color: white; padding: 40px 20px; text-align: center;'>");
             content.append("<h1 style='margin: 0; font-size: 26px; letter-spacing: 2px;'>THANH TOÁN THÀNH CÔNG</h1>");
-            content.append("<p style='margin-top: 10px; opacity: 0.9;'>Cảm ơn quý khách đã tin tưởng A&K Cinema</p>");
+            content.append("<p style='margin-top: 10px; opacity: 0.9;'>Mã đơn hàng: #").append(order.getId()).append("</p>");
             content.append("</div>");
 
             // Body
             content.append("<div style='padding: 30px; line-height: 1.6;'>");
             content.append("<p>Xin chào <b>").append(customerName).append("</b>,</p>");
-            content.append("<p>Giao dịch của quý khách đã được xác nhận. Vui lòng kiểm tra thông tin vé bên dưới:</p>");
+            content.append("<p>Giao dịch của quý khách đã được xác nhận. Vui lòng kiểm tra thông tin chi tiết bên dưới:</p>");
 
             content.append("<div style='background-color: #fcfcfc; border: 1px dashed #ddd; border-radius: 15px; padding: 20px; margin: 20px 0;'>");
             content.append("<table style='width: 100%;'>");
@@ -64,12 +66,17 @@ public class MailServiceImpl implements MailService {
             
             content.append("</table>");
             content.append("<div style='margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; text-align: right;'>");
-            content.append("<span style='color: #888;'>Tổng cộng:</span>");
-            content.append("<h2 style='margin: 0; color: #dc2626;'>").append(totalAmount).append("</h2>");
+            content.append("<span style='color: #888; font-size: 14px;'>Tổng thanh toán:</span>");
+            content.append("<h2 style='margin: 0; color: #dc2626;'>").append(totalAmountFormatted).append("</h2>");
             content.append("</div>");
             content.append("</div>");
 
-            content.append("<p style='font-size: 13px; color: #777; font-style: italic;'>* Quý khách vui lòng xuất trình email này tại quầy để nhận vé cứng và combo đã đặt.</p>");
+            content.append("<p style='font-size: 13px; color: #777; font-style: italic;'>* Lưu ý: Quý khách vui lòng xuất trình email này tại quầy để nhận vé cứng và combo.</p>");
+            content.append("</div>");
+            
+            // Footer
+            content.append("<div style='background-color: #f4f4f4; padding: 20px; text-align: center; color: #888; font-size: 12px;'>");
+            content.append("<p>© 2026 A&K Cinema. All rights reserved.</p>");
             content.append("</div>");
             content.append("</div>");
 

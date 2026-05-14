@@ -4,12 +4,17 @@ import com.example.cinema.dto.ApiResponse;
 import com.example.cinema.dto.OrderRequest;
 import com.example.cinema.dto.OrderResponse;
 import com.example.cinema.service.OrderService;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -20,6 +25,10 @@ import java.util.Map;
 public class OrderController {
 
     private final OrderService orderService;
+
+    // Đường dẫn trang Frontend mà ông muốn chuyển về sau khi thanh toán
+    @Value("${frontend.url:http://localhost:3000}")
+    private String frontendUrl;
 
     @PostMapping
     @PreAuthorize("isAuthenticated()")
@@ -35,30 +44,34 @@ public class OrderController {
     /**
      * Endpoint nhận phản hồi từ VNPAY
      * Không dùng @PreAuthorize vì VNPAY gọi về tự động
+     * Dùng HttpServletResponse để chuyển hướng trình duyệt về Frontend
      */
     @GetMapping("/vnpay-callback")
-    public ResponseEntity<ApiResponse<String>> vnpayCallback(@RequestParam Map<String, String> params) {
+    public void vnpayCallback(@RequestParam Map<String, String> params, HttpServletResponse response) throws IOException {
         String responseCode = params.get("vnp_ResponseCode");
         String txnRef = params.get("vnp_TxnRef"); // Đây chính là Order ID
+        String amount = params.get("vnp_Amount"); // Lấy thêm số tiền để Frontend hiển thị
+
         Long orderId = Long.parseLong(txnRef);
 
+        // 1. Cập nhật trạng thái vào Database
         if ("00".equals(responseCode)) {
             // Thanh toán thành công -> Cập nhật PAID
-            // Lưu ý: Duy nên dùng một hàm update riêng không check quyền Admin cho hệ thống tự động
             orderService.updateOrderStatus(orderId, "PAID");
-            return ResponseEntity.ok(ApiResponse.<String>builder()
-                    .status(200)
-                    .message("Thanh toán thành công!")
-                    .data("Order #" + orderId + " đã được xác nhận thanh toán.")
-                    .build());
         } else {
-            // Thanh toán thất bại
+            // Thanh toán thất bại hoặc hủy -> Cập nhật CANCELLED
             orderService.updateOrderStatus(orderId, "CANCELLED");
-            return ResponseEntity.status(400).body(ApiResponse.<String>builder()
-                    .status(400)
-                    .message("Giao dịch thất bại hoặc đã bị hủy.")
-                    .build());
         }
+
+        // 2. Chuyển hướng trình duyệt về trang Frontend (PaymentResultPage)
+        // Kèm theo các tham số để Frontend biết là thành công hay thất bại
+        String redirectUrl = frontendUrl + "/booking/payment/result"
+                + "?vnp_ResponseCode=" + responseCode
+                + "&vnp_TxnRef=" + txnRef
+                + "&vnp_Amount=" + (amount != null ? amount : "0");
+
+        // Gửi lệnh Redirect (Mã 302)
+        response.sendRedirect(redirectUrl);
     }
 
     @GetMapping("/my-history")
