@@ -136,6 +136,10 @@ public class MovieServiceImpl implements MovieService {
         dto.setPosterUrl(movie.getPosterUrl()); 
         dto.setDuration(movie.getDuration());
         dto.setStatus(movie.getStatus());
+        
+        // FIX CHÍ MẠNG: Map điểm số rating tổng từ bảng Movie sang DTO để trả về Frontend
+        dto.setRating(movie.getRating()); 
+
         if (movie.getGenre() != null) {
             dto.setGenreName(movie.getGenre().getName());
         }

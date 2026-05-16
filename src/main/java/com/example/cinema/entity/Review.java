@@ -17,7 +17,7 @@ public class Review {
     private Long id;
 
     @Column(nullable = false)
-    private Integer rating; // 1 -> 5 sao
+    private Double rating; // FIX: Đổi từ Integer sang Double để lưu đúng số thập phân xuống Database
 
     @Column(columnDefinition = "TEXT")
     private String comment;

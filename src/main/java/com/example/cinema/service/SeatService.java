@@ -2,15 +2,21 @@ package com.example.cinema.service;
 
 import com.example.cinema.dto.SeatRequest;
 import com.example.cinema.entity.Seat;
+import org.springframework.data.domain.Page;
 import java.util.List;
+import java.util.Map;
 
 public interface SeatService {
-    List<Seat> getAllSeats();
-    List<Seat> getSeatsByRoom(Long roomId);
-    List<Seat> getSeatsByShowtime(Long showtimeId); 
+    List<Seat> getSeatsByShowtime(Long showtimeId);
+    void validateSeatSelection(Long showtimeId, List<Long> selectedSeatIds);
+    List<Seat> generateSeatsForRoom(Long roomId, int numRows, int seatsPerRow);
     Seat createSeat(SeatRequest request);
-    List<Seat> generateSeatsForRoom(Long roomId, int rows, int seatsPerRow);
     Seat updateSeat(Long id, SeatRequest request);
     void deleteSeat(Long id);
+    List<Seat> getSeatsByRoom(Long roomId);
+    List<Seat> getAllSeats();
     void deleteSeatsByRoom(Long roomId);
+    
+    // Hàm mới phục vụ việc kiểm tra điều kiện xóa ghế từ Frontend
+    Map<String, Boolean> checkSeatEligibility(Long id);
 }

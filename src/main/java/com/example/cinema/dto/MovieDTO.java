@@ -10,4 +10,5 @@ public class MovieDTO {
     private Integer duration;
     private String genreName; 
     private String status;
+    private Double rating; // FIX: Bổ sung trường này để chứa điểm số tổng gửi về Frontend
 }

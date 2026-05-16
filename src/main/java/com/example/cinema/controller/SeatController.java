@@ -10,6 +10,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/seats")
@@ -44,6 +45,17 @@ public class SeatController {
                 .status(200)
                 .message("Lấy danh sách ghế của phòng thành công")
                 .data(seatService.getSeatsByRoom(roomId))
+                .build());
+    }
+
+    // ENDPOINT MỚI: Tiếp nhận kiểm tra điều kiện tồn tại vé của ghế từ giao diện Designer Frontend
+    @GetMapping("/{id}/check-tickets")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<Map<String, Boolean>>> checkSeatEligibility(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.<Map<String, Boolean>>builder()
+                .status(200)
+                .message("Kiểm tra điều kiện xóa ghế thành công")
+                .data(seatService.checkSeatEligibility(id))
                 .build());
     }
 
@@ -93,7 +105,7 @@ public class SeatController {
     @DeleteMapping("/room/{roomId}")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<String>> deleteSeatsByRoom(@PathVariable Long roomId) {
-        seatService.deleteSeatsByRoom(roomId); // Bạn cần viết thêm hàm này trong Service
+        seatService.deleteSeatsByRoom(roomId);
         return ResponseEntity.ok(ApiResponse.<String>builder()
                 .status(200)
                 .message("Đã xóa toàn bộ ghế của phòng " + roomId)

@@ -50,6 +50,9 @@ public class SecurityConfig {
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 .requestMatchers("/api/v1/auth/**").permitAll()
 
+                // QUAN TRỌNG: Cho phép đi qua endpoint lỗi hệ thống để không bị mất CORS headers khi vấp Exception
+                .requestMatchers("/error").permitAll()
+
                 // CẤP QUYỀN CHO VNPAY CALLBACK
                 .requestMatchers("/api/v1/orders/vnpay-callback").permitAll()
 
@@ -74,7 +77,10 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:3000")); 
+        
+        // FIX: Cho phép cả localhost và 127.0.0.1 để tránh xung đột cổng gọi của trình duyệt
+        configuration.setAllowedOrigins(Arrays.asList("http://localhost:3000", "http://127.0.0.1:3000")); 
+        
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "X-Requested-With"));
         configuration.setAllowCredentials(true);

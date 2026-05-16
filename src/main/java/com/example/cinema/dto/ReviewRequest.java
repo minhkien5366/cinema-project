@@ -5,6 +5,6 @@ import lombok.Data;
 @Data
 public class ReviewRequest {
     private Long movieId;
-    private Integer rating; // 1 -> 5 sao
+    private Double rating; // FIX: Đổi từ Integer sang Double để nhận điểm nửa sao (vd: 4.5)
     private String comment;
 }

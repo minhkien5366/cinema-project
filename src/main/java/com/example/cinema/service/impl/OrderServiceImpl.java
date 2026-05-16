@@ -7,6 +7,7 @@ import com.example.cinema.repository.*;
 import com.example.cinema.service.MailService;
 import com.example.cinema.service.OrderService;
 import com.example.cinema.service.VoucherService;
+import com.example.cinema.service.SeatService;
 import com.example.cinema.util.VNPayUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,9 +39,10 @@ public class OrderServiceImpl implements OrderService {
     private final VoucherService voucherService;
     private final SeatPriceConfigRepository seatPriceConfigRepository; 
     
-    // TIÊM THÊM DỊCH VỤ MAIL VÀ WEBSOCKET
+    // TIÊM THÊM DỊCH VỤ MAIL, WEBSOCKET VÀ SEAT VALIDATION
     private final MailService mailService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final SeatService seatService;
 
     @Value("${vnpay.url:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}")
     private String vnp_PayUrl;
@@ -62,6 +64,11 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Suất chiếu này đã diễn ra, không thể đặt vé!");
         }
 
+        // ================= KÍCH HOẠT TEST CASE CHỐNG ĐỂ GHẾ TRỐNG ĐƠN LẺ =================
+        if (request.getSeatIds() != null && !request.getSeatIds().isEmpty()) {
+            seatService.validateSeatSelection(request.getShowtimeId(), request.getSeatIds());
+        }
+
         int javaDay = showtime.getStartTime()
         .getDayOfWeek()
         .getValue();
@@ -77,6 +84,9 @@ public class OrderServiceImpl implements OrderService {
         Order savedOrder = orderRepository.save(order);
         double total = 0.0;
         List<OrderDetail> details = new ArrayList<>();
+
+        // Sinh 1 mã định danh duy nhất dùng chung cho toàn bộ vé thuộc đơn hàng này
+        String commonBookingCode = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
 
         if (request.getSeatIds() != null) {
             for (Long seatId : request.getSeatIds()) {
@@ -95,7 +105,7 @@ public class OrderServiceImpl implements OrderService {
 
                 Ticket ticket = Ticket.builder()
                     .seat(seat).showtime(showtime).user(user).price(dynamicPrice)
-                    .status("BOOKED").bookingCode(UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                    .status("BOOKED").bookingCode(commonBookingCode) // Đồng bộ 1 mã chung cho cả Order
                     .build();
                 ticketRepository.save(ticket);
 
@@ -212,8 +222,9 @@ public class OrderServiceImpl implements OrderService {
             adminNotify.put("customer", savedOrder.getUser().getFirstName() + " " + savedOrder.getUser().getLastName());
             adminNotify.put("total", savedOrder.getTotalAmount());
             
-// Ép kiểu String cho tham số đầu tiên và Object cho tham số thứ hai
-            messagingTemplate.convertAndSend((String) "/topic/admin-notifications", (Object) adminNotify);        }
+            // Ép kiểu String cho tham số đầu tiên và Object cho tham số thứ hai
+            messagingTemplate.convertAndSend((String) "/topic/admin-notifications", (Object) adminNotify);        
+        }
 
         return mapToResponse(savedOrder);
     }

@@ -29,9 +29,9 @@ public class ReviewServiceImpl implements ReviewService {
         Movie movie = movieRepository.findById(request.getMovieId())
                 .orElseThrow(() -> new ResourceNotFoundException("Phim không tồn tại"));
 
-        // 1. RÀNG BUỘC: Thang điểm 1-5
-        if (request.getRating() < 1 || request.getRating() > 5) {
-            throw new RuntimeException("Điểm đánh giá phải từ 1 đến 5 sao.");
+        // 1. RÀNG BUỘC ĐÃ CẬP NHẬT: Thang điểm chấp nhận từ 0.5 đến 5.0 sao
+        if (request.getRating() < 0.5 || request.getRating() > 5.0) {
+            throw new RuntimeException("Điểm đánh giá phải nằm trong khoảng từ 0.5 đến 5 sao.");
         }
 
         // 2. RÀNG BUỘC: Nội dung tối thiểu 10 ký tự
@@ -74,7 +74,7 @@ public class ReviewServiceImpl implements ReviewService {
     }
 
     /**
-     * TÍNH NĂNG MỚI: Admin xóa đánh giá không phù hợp
+     * Admin hoặc chính chủ nhân của review xóa đánh giá không phù hợp
      */
     @Override
     @Transactional
@@ -84,7 +84,6 @@ public class ReviewServiceImpl implements ReviewService {
 
         User currentUser = getCurrentUser();
         
-        // Chỉ Admin hoặc chính chủ nhân của review mới có quyền xóa
         boolean isAdmin = currentUser.getRoles().stream()
                 .anyMatch(r -> r.getRoleName().equals("ADMIN") || r.getRoleName().equals("SUPER_ADMIN"));
         boolean isOwner = review.getUser().getUserId().equals(currentUser.getUserId());
@@ -96,7 +95,7 @@ public class ReviewServiceImpl implements ReviewService {
         Movie movie = review.getMovie();
         reviewRepository.delete(review);
 
-        // Sau khi xóa, phải tính lại điểm trung bình cho phim
+        // Sau khi xóa, tính lại điểm trung bình cho phim
         updateMovieRatingCache(movie);
     }
 
@@ -106,8 +105,7 @@ public class ReviewServiceImpl implements ReviewService {
     }
 
     /**
-     * Hàm dùng chung để tính toán lại Rating cho phim
-     * Sử dụng công thức: $$Rating_{avg} = \frac{\sum Rating}{Total Reviews}$$
+     * Hàm dùng chung để tính toán lại Rating cho phim công thức: (Tổng điểm / Tổng lượt Review)
      */
     private void updateMovieRatingCache(Movie movie) {
         Double avgRating = reviewRepository.getAverageRatingByMovieId(movie.getId());
