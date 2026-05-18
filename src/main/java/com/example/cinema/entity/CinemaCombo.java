@@ -27,7 +27,11 @@ public class CinemaCombo {
     @JoinColumn(name = "combo_id")
     private Combo combo;
 
-    // ⭐ dùng primitive boolean (KHÔNG dùng Boolean)
+    // ⭐ Dùng primitive boolean theo đúng yêu cầu của ông
     @Column(nullable = false)
     private boolean active = true;
+
+    // 🔥 BỔ SUNG CHÍ MẠNG: Số lượng bắp nước tồn kho tại chi nhánh này
+    // Dùng kiểu 'Integer' (không dùng int) để khi SuperAdmin tạo mặc định sẽ là null
+    private Integer stock;
 }

@@ -14,4 +14,5 @@ public class ComboAdminResponse {
     private String imageUrl;
     private Double price;
     private boolean isAvailable;
+    private Integer stock;
 }

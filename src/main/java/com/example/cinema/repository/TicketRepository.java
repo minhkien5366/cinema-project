@@ -45,6 +45,7 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     boolean existsByUser_UserIdAndShowtime_Movie_IdAndStatus(Long userId, Long movieId, String status);
 
     Optional<Ticket> findBySeatIdAndShowtimeId(Long seatId, Long showtimeId);
+    boolean existsBySeatAndShowtimeAndStatusNotIgnoreCase(Seat seat, Showtime showtime, String status);
 
     @Query("SELECT t.seat FROM Ticket t WHERE t.showtime.id = :showtimeId AND t.status IN ('BOOKED', 'PAID')")
     List<Seat> findOccupiedSeatsByShowtimeId(@Param("showtimeId") Long showtimeId);

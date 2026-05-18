@@ -64,6 +64,11 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Suất chiếu này đã diễn ra, không thể đặt vé!");
         }
 
+        // 🔥 RÀNG BUỘC MỚI: Giới hạn tối đa đặt 6 ghế trong 1 đơn hàng (Bảo mật tầng cứng Backend)
+        if (request.getSeatIds() != null && request.getSeatIds().size() > 6) {
+            throw new RuntimeException("Mỗi giao dịch chỉ được đặt tối đa 6 ghế!");
+        }
+
         // ================= KÍCH HOẠT TEST CASE CHỐNG ĐỂ GHẾ TRỐNG ĐƠN LẺ =================
         if (request.getSeatIds() != null && !request.getSeatIds().isEmpty()) {
             seatService.validateSeatSelection(request.getShowtimeId(), request.getSeatIds());
@@ -91,7 +96,10 @@ public class OrderServiceImpl implements OrderService {
         if (request.getSeatIds() != null) {
             for (Long seatId : request.getSeatIds()) {
                 Seat seat = seatRepository.findById(seatId).orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
-                if (ticketRepository.existsBySeatAndShowtime(seat, showtime)) {
+                
+                // 🔥 FIX ĐẮT GIÁ TẠI ĐÂY: Chỉ chặn nếu ghế đã có vé trạng thái khác CANCELLED
+                // Nếu vé cũ có trạng thái CANCELLED, hệ thống bỏ qua và cho phép đặt bình thường
+                if (ticketRepository.existsBySeatAndShowtimeAndStatusNotIgnoreCase(seat, showtime, "CANCELLED")) {
                     throw new RuntimeException("Ghế " + seat.getName() + " đã có người đặt!");
                 }
 
@@ -229,32 +237,29 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(savedOrder);
     }
 
-@Override 
-public List<OrderResponse> getAllOrders() { 
-    User user = getCurrentUser();
-    Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
-    
-    // Cách 1: Nếu muốn TEST nhanh xóa bỏ bộ lọc để lôi hết DATA ra xem:
-    // return orderRepository.findAll(sort).stream().map(this::mapToResponse).collect(Collectors.toList());
-
-    // Cách 2: Fix chuẩn logic phân quyền bảo mật
-    if (isSuperAdmin(user)) {
-        return orderRepository.findAll(sort).stream()
+    @Override 
+    public List<OrderResponse> getAllOrders() { 
+        User user = getCurrentUser();
+        Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
+        
+        // Cách 2: Fix chuẩn logic phân quyền bảo mật
+        if (isSuperAdmin(user)) {
+            return orderRepository.findAll(sort).stream()
+                    .map(this::mapToResponse)
+                    .collect(Collectors.toList());
+        }
+        
+        // Nếu managedCinemaItemId bị null, tạm thời trả về toàn bộ thay vì chặn đứng dữ liệu rỗng
+        if (user.getManagedCinemaItemId() == null) {
+            return orderRepository.findAll(sort).stream()
+                    .map(this::mapToResponse)
+                    .collect(Collectors.toList());
+        }
+        
+        return orderRepository.findByCinemaItem_Id(user.getManagedCinemaItemId(), sort).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
-    
-    // Nếu managedCinemaItemId bị null, tạm thời trả về toàn bộ thay vì chặn đứng dữ liệu rỗng
-    if (user.getManagedCinemaItemId() == null) {
-        return orderRepository.findAll(sort).stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
-    }
-    
-    return orderRepository.findByCinemaItem_Id(user.getManagedCinemaItemId(), sort).stream()
-            .map(this::mapToResponse)
-            .collect(Collectors.toList());
-}
 
     @Override public List<OrderResponse> getMyOrders() { 
         return orderRepository.findByUserEmail(getCurrentUser().getEmail(), Sort.by(Sort.Direction.DESC, "createdAt")).stream().map(this::mapToResponse).collect(Collectors.toList()); 

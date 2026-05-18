@@ -71,7 +71,7 @@ public class SeatServiceImpl implements SeatService {
         return seats;
     }
 
-    // ================= CHỐNG ĐỂ GHẾ TRỐNG ĐƠN LẺ (TEST CASE ĐẶT VÉ) =================
+    // ================= CHỐNG ĐỂ GHẾ TRỐNG ĐƠN LẺ CHUẨN CGV (THUẬT TOÁN TOẠ ĐỘ TUYỆT ĐỐI) =================
     @Override
     public void validateSeatSelection(Long showtimeId, List<Long> selectedSeatIds) {
         Showtime showtime = showtimeRepository.findById(showtimeId)
@@ -87,35 +87,66 @@ public class SeatServiceImpl implements SeatService {
 
         Set<Long> newlySelected = new HashSet<>(selectedSeatIds);
 
+        // Gom nhóm ghế theo từng hàng (A, B, C...) để quét độc lập
         Map<String, List<Seat>> seatsByRow = allSeats.stream()
                 .collect(Collectors.groupingBy(Seat::getSeatRow));
 
         for (Map.Entry<String, List<Seat>> entry : seatsByRow.entrySet()) {
             List<Seat> rowSeats = entry.getValue();
-            rowSeats.sort(Comparator.comparingInt(s -> Integer.parseInt(s.getSeatNumber())));
+            
+            // Ánh xạ nhanh: Số ghế tuyệt đối -> Đối tượng ghế vật lý (Giải quyết triệt để lỗi khuyết số ghế/lối đi)
+            Map<Integer, Seat> seatMapByNum = new HashMap<>();
+            for (Seat s : rowSeats) {
+                try {
+                    seatMapByNum.put(Integer.parseInt(s.getSeatNumber()), s);
+                } catch (NumberFormatException e) {
+                    // Phòng hờ trường hợp số ghế chứa ký tự lạ
+                }
+            }
 
-            int n = rowSeats.size();
-            for (int i = 0; i < n; i++) {
-                Seat currentSeat = rowSeats.get(i);
+            for (Seat currentSeat : rowSeats) {
                 Long currentId = currentSeat.getId();
+                boolean isOccupied = alreadyOccupied.contains(currentId);
+                boolean isSelected = newlySelected.contains(currentId);
 
-                boolean isFreePostBooking = !alreadyOccupied.contains(currentId) && !newlySelected.contains(currentId);
+                // CHỈ QUÉT: Những ghế thực sự còn TRỐNG sau khi giả định đơn hàng này đặt thành công
+                if (!isOccupied && !isSelected) {
+                    int currentNum = Integer.parseInt(currentSeat.getSeatNumber());
 
-                if (isFreePostBooking) {
-                    boolean leftIsBlocked = (i == 0) 
-                            || alreadyOccupied.contains(rowSeats.get(i - 1).getId()) 
-                            || newlySelected.contains(rowSeats.get(i - 1).getId());
-                            
-                    boolean rightIsBlocked = (i == n - 1) 
-                            || alreadyOccupied.contains(rowSeats.get(i + 1).getId()) 
-                            || newlySelected.contains(rowSeats.get(i + 1).getId());
+                    // --- KIỂM TRA BIÊN TRÁI (Số ghế tuyệt đối - 1) ---
+                    Seat leftSeat = seatMapByNum.get(currentNum - 1);
+                    boolean leftBlocked = false;
+                    boolean leftSelected = false;
+                    if (leftSeat == null) {
+                        leftBlocked = true; // Không có ghế lân cận -> Tường rạp hoặc Lối đi (Hợp lệ)
+                    } else {
+                        boolean leftOccupied = alreadyOccupied.contains(leftSeat.getId());
+                        boolean leftSimSelected = newlySelected.contains(leftSeat.getId());
+                        if (leftOccupied || leftSimSelected) {
+                            leftBlocked = true;
+                            if (leftSimSelected) leftSelected = true;
+                        }
+                    }
 
-                    if (leftIsBlocked && rightIsBlocked) {
-                        boolean causedByUser = false;
-                        if (i > 0 && newlySelected.contains(rowSeats.get(i - 1).getId())) causedByUser = true;
-                        if (i < n - 1 && newlySelected.contains(rowSeats.get(i + 1).getId())) causedByUser = true;
+                    // --- KIỂM TRA BIÊN PHẢI (Số ghế tuyệt đối + 1) ---
+                    Seat rightSeat = seatMapByNum.get(currentNum + 1);
+                    boolean rightBlocked = false;
+                    boolean rightSelected = false;
+                    if (rightSeat == null) {
+                        rightBlocked = true; // Không có ghế lân cận -> Tường rạp hoặc Lối đi (Hợp lệ)
+                    } else {
+                        boolean rightOccupied = alreadyOccupied.contains(rightSeat.getId());
+                        boolean rightSimSelected = newlySelected.contains(rightSeat.getId());
+                        if (rightOccupied || rightSimSelected) {
+                            rightBlocked = true;
+                            if (rightSimSelected) rightSelected = true;
+                        }
+                    }
 
-                        if (causedByUser) {
+                    // NẾU HAI BÊN GHẾ TRỐNG ĐỀU BỊ CHẶN CỨNG -> ĐÂY LÀ GHẾ ĐƠN LẺ BỊ CÔ LẬP
+                    if (leftBlocked && rightBlocked) {
+                        // Chỉ cấu thành lỗi nếu khe trống cô lập này sinh ra trực tiếp do lượt chọn của chính user
+                        if (leftSelected || rightSelected) {
                             throw new RuntimeException("Không được để lại ghế trống đơn lẻ (" + currentSeat.getName() + ") ở giữa hoặc đầu hàng!");
                         }
                     }
