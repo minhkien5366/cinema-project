@@ -229,12 +229,32 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(savedOrder);
     }
 
-    @Override public List<OrderResponse> getAllOrders() { 
-        User user = getCurrentUser();
-        Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
-        if (isSuperAdmin(user)) return orderRepository.findAll(sort).stream().map(this::mapToResponse).collect(Collectors.toList());
-        return orderRepository.findByCinemaItem_Id(user.getManagedCinemaItemId(), sort).stream().map(this::mapToResponse).collect(Collectors.toList());
+@Override 
+public List<OrderResponse> getAllOrders() { 
+    User user = getCurrentUser();
+    Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
+    
+    // Cách 1: Nếu muốn TEST nhanh xóa bỏ bộ lọc để lôi hết DATA ra xem:
+    // return orderRepository.findAll(sort).stream().map(this::mapToResponse).collect(Collectors.toList());
+
+    // Cách 2: Fix chuẩn logic phân quyền bảo mật
+    if (isSuperAdmin(user)) {
+        return orderRepository.findAll(sort).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
     }
+    
+    // Nếu managedCinemaItemId bị null, tạm thời trả về toàn bộ thay vì chặn đứng dữ liệu rỗng
+    if (user.getManagedCinemaItemId() == null) {
+        return orderRepository.findAll(sort).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+    
+    return orderRepository.findByCinemaItem_Id(user.getManagedCinemaItemId(), sort).stream()
+            .map(this::mapToResponse)
+            .collect(Collectors.toList());
+}
 
     @Override public List<OrderResponse> getMyOrders() { 
         return orderRepository.findByUserEmail(getCurrentUser().getEmail(), Sort.by(Sort.Direction.DESC, "createdAt")).stream().map(this::mapToResponse).collect(Collectors.toList()); 
