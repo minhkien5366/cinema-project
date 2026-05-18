@@ -3,6 +3,7 @@ package com.example.cinema.service;
 import com.example.cinema.dto.ShowtimeRequest;
 import com.example.cinema.entity.Showtime;
 import java.util.List;
+import org.springframework.web.multipart.MultipartFile;
 
 public interface ShowtimeService {
     List<Showtime> getAll(); // Tự động lọc theo Admin/SuperAdmin
@@ -13,4 +14,5 @@ public interface ShowtimeService {
     Showtime updateShowtime(Long id, ShowtimeRequest request);
     void deleteShowtime(Long id);
     List<Showtime> getByMovieAndDate(Long movieId, String dateStr);
+    void importExcel(MultipartFile file);
 }

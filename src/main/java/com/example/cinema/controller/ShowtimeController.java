@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -58,6 +59,13 @@ public class ShowtimeController {
         return ResponseEntity.status(201).body(ApiResponse.<Showtime>builder()
                 .status(201).message("Đã tạo suất chiếu").data(showtimeService.createShowtime(request)).build());
     }
+
+    @PostMapping("/import")
+        public ResponseEntity<?> importShowtime(
+                @RequestParam("file") MultipartFile file) {
+        showtimeService.importExcel(file);
+        return ResponseEntity.ok("Import thành công");
+        }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
