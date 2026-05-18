@@ -10,15 +10,30 @@ import com.example.cinema.repository.MovieRepository;
 import com.example.cinema.service.CloudinaryService; // Import interface mới
 import com.example.cinema.service.MovieService;
 import lombok.RequiredArgsConstructor;
+
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ss.usermodel.DateUtil;
+
+import java.io.InputStream;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 @Service
 @RequiredArgsConstructor
 public class MovieServiceImpl implements MovieService {
@@ -158,4 +173,96 @@ public class MovieServiceImpl implements MovieService {
         movie.setReleaseDate(request.getReleaseDate());
         movie.setGenre(genre);
     }
+
+    @Override
+@Transactional
+public void importExcel(MultipartFile file) {
+
+    try (InputStream is = file.getInputStream();
+         Workbook workbook = new XSSFWorkbook(is)) {
+
+        Sheet sheet = workbook.getSheetAt(0);
+
+        DateTimeFormatter formatter =
+                DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+
+            Row row = sheet.getRow(i);
+            if (row == null) continue;
+
+            try {
+
+                String title = readString(row.getCell(0));
+                String description = readString(row.getCell(1));
+                Integer duration = readInt(row.getCell(2));
+                String director = readString(row.getCell(3));
+                String cast = readString(row.getCell(4));
+                String country = readString(row.getCell(5));
+                String status = readString(row.getCell(6));
+                LocalDate releaseDate =
+                        readDate(row.getCell(7), formatter);
+                String genreName = readString(row.getCell(8));
+                String posterUrl = readString(row.getCell(9));
+
+                if (title == null || duration == null || genreName == null)
+                    throw new RuntimeException("Thiếu dữ liệu bắt buộc");
+
+                // check trùng
+                if (movieRepository.existsByTitleIgnoreCase(title))
+                    throw new RuntimeException("Phim đã tồn tại");
+
+                Genre genre = genreRepository
+                        .findByNameIgnoreCase(genreName)
+                        .orElseThrow(() ->
+                                new RuntimeException("Không tìm thấy genre: " + genreName));
+
+                Movie movie = new Movie();
+                movie.setTitle(title);
+                movie.setDescription(description);
+                movie.setDuration(duration);
+                movie.setDirector(director);
+                movie.setCast(cast);
+                movie.setCountry(country);
+                movie.setStatus(status);
+                movie.setReleaseDate(releaseDate);
+                movie.setGenre(genre);
+                movie.setPosterUrl(posterUrl);
+
+                movieRepository.save(movie);
+
+            } catch (Exception rowError) {
+                throw new RuntimeException(
+                        "Lỗi dòng " + (i + 1) + ": " + rowError.getMessage()
+                );
+            }
+        }
+
+    } catch (Exception e) {
+        throw new RuntimeException("Import movie thất bại: " + e.getMessage());
+    }
+}
+private String readString(Cell cell) {
+    if (cell == null) return null;
+    cell.setCellType(CellType.STRING);
+    return cell.getStringCellValue().trim();
+}
+
+private Integer readInt(Cell cell) {
+    if (cell == null) return null;
+    return (int) cell.getNumericCellValue();
+}
+
+private LocalDate readDate(Cell cell, DateTimeFormatter formatter) {
+    if (cell == null) return null;
+
+    if (cell.getCellType() == CellType.NUMERIC) {
+        return cell.getLocalDateTimeCellValue().toLocalDate();
+    }
+
+    return LocalDate.parse(
+            cell.getStringCellValue(),
+            formatter
+    );
+}
 }

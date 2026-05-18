@@ -98,4 +98,12 @@ public class MovieController {
                         .build()
         );
     }
+
+    @PostMapping("/import")
+public ResponseEntity<?> importMovies(
+        @RequestParam("file") MultipartFile file
+) {
+    movieService.importExcel(file);
+    return ResponseEntity.ok("Import movie thành công");
+}
 }

@@ -6,13 +6,30 @@ import com.example.cinema.exception.ResourceNotFoundException;
 import com.example.cinema.repository.*;
 import com.example.cinema.service.ShowtimeService;
 import lombok.RequiredArgsConstructor;
+
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.DateUtil;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.DateUtil;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 @Service
 @RequiredArgsConstructor
@@ -23,7 +40,26 @@ public class ShowtimeServiceImpl implements ShowtimeService {
     private final CinemaItemRepository cinemaItemRepository;
     private final RoomRepository roomRepository;
     private final UserRepository userRepository;
+    private String readStringCell(Cell cell) {
+        if (cell == null) return null;
+        if (cell.getCellType() == CellType.STRING)
+            return cell.getStringCellValue().trim();
+        if (cell.getCellType() == CellType.NUMERIC)
+            return String.valueOf((long) cell.getNumericCellValue());
+        return null;
+    }
 
+    private LocalDateTime readDateCell(Cell cell,DateTimeFormatter formatter) {
+        if (cell == null) return null;
+        if (cell.getCellType() == CellType.NUMERIC
+                && DateUtil.isCellDateFormatted(cell)) {
+            return cell.getLocalDateTimeCellValue();
+        }
+        return LocalDateTime.parse(
+                cell.getStringCellValue().trim(),
+                formatter
+        );
+    }
     @Override
     public List<Showtime> getAll() {
         User user = getCurrentUser();
@@ -42,7 +78,88 @@ public class ShowtimeServiceImpl implements ShowtimeService {
     @Override
     public List<Showtime> getByCinemaItem(Long cinemaItemId) { return showtimeRepository.findByCinemaItem_Id(cinemaItemId); }
 
-    @Override
+@Override
+@Transactional
+public void importExcel(MultipartFile file) {
+    User user = getCurrentUser();
+    
+    // Kiểm tra quyền quản lý chi nhánh rạp của User trước khi xử lý file
+    Long managedCinemaId = user.getManagedCinemaItemId();
+    if (managedCinemaId == null) {
+        throw new RuntimeException("Tài khoản của bạn không được phân quyền quản lý chi nhánh nào!");
+    }
+
+    try (InputStream is = file.getInputStream();
+         Workbook workbook = new XSSFWorkbook(is)) {
+        
+        Sheet sheet = workbook.getSheetAt(0);
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        
+        for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+            Row row = sheet.getRow(i);
+            if (row == null) continue;
+            
+            try {
+                String movieName = readStringCell(row.getCell(0));
+                String roomName = readStringCell(row.getCell(1));
+                LocalDateTime startTime = readDateCell(row.getCell(2), formatter);
+                
+                if (movieName == null || roomName == null || startTime == null) {
+                    throw new RuntimeException("Thiếu dữ liệu bắt buộc (Tên phim, Tên phòng hoặc Giờ khởi chiếu)");
+                }
+                
+                if (startTime.isBefore(LocalDateTime.now())) {
+                    throw new RuntimeException("Thời gian bắt đầu suất chiếu không được ở quá khứ");
+                }
+                
+                // 1. Tìm bộ phim đầu tiên khớp tên
+                Movie movie = movieRepository.findFirstByTitle(movieName)
+                        .orElseThrow(() -> new RuntimeException("Không tìm thấy phim: " + movieName));
+                
+                // 2. Tìm phòng thuộc chi nhánh quản lý của Admin
+                Room room = roomRepository.findByNameAndCinemaItemId(roomName, managedCinemaId)
+                        .orElseThrow(() -> new RuntimeException("Không tìm thấy phòng '" + roomName + "' thuộc chi nhánh của bạn"));
+                
+                CinemaItem cinemaItem = room.getCinemaItem();
+                
+                // Kiểm tra quyền hạn an toàn hệ thống
+                validateBranchAccess(cinemaItem.getId());
+                
+                // 3. TỰ ĐỘNG TÍNH TOÁN GIỜ KẾ THÚC (Ép buộc hệ thống tự tính 100%)
+                LocalDateTime endTime = startTime.plusMinutes(movie.getDuration());
+                
+                // Kiểm tra trùng lịch và khoảng nghỉ (Buffer)
+                checkShowtimeOverlapWithBuffer(
+                        room.getId(),
+                        startTime,
+                        endTime,
+                        null
+                );
+                
+                // Tạo mới và lưu Suất chiếu
+                Showtime showtime = Showtime.builder()
+                        .movie(movie)
+                        .room(room)
+                        .cinemaItem(cinemaItem)
+                        .startTime(startTime)
+                        .endTime(endTime)
+                        .build();
+                        
+                showtimeRepository.save(showtime);
+                
+            } catch (Exception rowError) {
+                // Giữ nguyên cơ chế bọc lỗi từng dòng để rollback toàn bộ nếu có lỗi dữ liệu
+                throw new RuntimeException(
+                        "Lỗi dòng " + (i + 1) + ": " + rowError.getMessage()
+                );
+            }
+        }
+    } catch (Exception e) {
+        throw new RuntimeException("Import thất bại: " + e.getMessage());
+    }
+}
+   
+@Override
     @Transactional
     public Showtime createShowtime(ShowtimeRequest request) {
         validateBranchAccess(request.getCinemaItemId());
