@@ -5,7 +5,6 @@ import com.example.cinema.entity.*;
 import com.example.cinema.exception.ResourceNotFoundException;
 import com.example.cinema.repository.*;
 import com.example.cinema.service.SeatService;
-import com.example.cinema.repository.SeatPriceConfigRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -23,8 +22,6 @@ public class SeatServiceImpl implements SeatService {
     private final ShowtimeRepository showtimeRepository;
     private final TicketRepository ticketRepository;
     private final UserRepository userRepository;
-    
-    // TIÊM THÊM REPOSITORY CẤU HÌNH GIÁ ĐỂ TÍNH GIÁ ĐỘNG CHO FE
     private final SeatPriceConfigRepository seatPriceConfigRepository;
 
     // ================= PRICE CONFIG =================
@@ -43,29 +40,22 @@ public class SeatServiceImpl implements SeatService {
         List<Seat> seats = seatRepository.findByRoomId(showtime.getRoom().getId());
         List<Ticket> tickets = ticketRepository.findByShowtimeId(showtimeId);
 
-        // 🔥 ĐẢM BẢO AN TOÀN: Lọc loại trừ cuống vé null nếu có
         Set<Long> occupied = tickets.stream()
                 .filter(t -> !"CANCELLED".equalsIgnoreCase(t.getStatus()))
                 .filter(t -> t.getSeat() != null) 
                 .map(t -> t.getSeat().getId())
                 .collect(Collectors.toSet());
 
-        // ĐOẠN ĐỔI GIÁ ĐỘNG: Tính toán thứ trong tuần của suất chiếu (2 = Thứ 2, ..., 8 = Chủ Nhật)
         int javaDay = showtime.getStartTime().getDayOfWeek().getValue();
         int dayValue = (javaDay == 7) ? 8 : javaDay + 1;
 
         for (Seat s : seats) {
-            // 1. Cập nhật trạng thái trống/đã đặt
             s.setStatus(occupied.contains(s.getId()) ? "OCCUPIED" : "AVAILABLE");
             
-            // 2. CẬP NHẬT GIÁ ĐỘNG TẠI ĐÂY ĐỂ TRẢ VỀ CHO FE ĐÚNG GIÁ CHỦ NHẬT
             Double dynamicPrice = seatPriceConfigRepository
-                .findBySeatTypeAndDayOfWeek(
-                    s.getSeatType().toUpperCase(),
-                    dayValue
-                )
+                .findBySeatTypeAndDayOfWeek(s.getSeatType().toUpperCase(), dayValue)
                 .map(SeatPriceConfig::getPrice)
-                .orElse(s.getPrice()); // Nếu không có cấu hình ngày đó thì lấy giá mặc định của ghế
+                .orElse(s.getPrice());
                 
             s.setPrice(dynamicPrice);
         }
@@ -73,7 +63,7 @@ public class SeatServiceImpl implements SeatService {
         return seats;
     }
 
-    // ================= CHỐNG ĐỂ GHẾ TRỐNG ĐƠN LẺ CHUẨN CGV (THUẬT TOÁN TOẠ ĐỘ TUYỆT ĐỐI) =================
+    // ================= THUẬT TOÁN KIỂM TRONG GHẾ TRỐNG ĐƠN LẺ NÂNG CẤP CHUẨN CGV 100% =================
     @Override
     public void validateSeatSelection(Long showtimeId, List<Long> selectedSeatIds) {
         Showtime showtime = showtimeRepository.findById(showtimeId)
@@ -90,67 +80,76 @@ public class SeatServiceImpl implements SeatService {
 
         Set<Long> newlySelected = new HashSet<>(selectedSeatIds);
 
-        // Gom nhóm ghế theo từng hàng (A, B, C...) để quét độc lập
+        // Gom nhóm toàn bộ ghế theo từng Hàng (A, B, C...) để quét độc lập từng hàng một
         Map<String, List<Seat>> seatsByRow = allSeats.stream()
                 .collect(Collectors.groupingBy(Seat::getSeatRow));
 
         for (Map.Entry<String, List<Seat>> entry : seatsByRow.entrySet()) {
             List<Seat> rowSeats = entry.getValue();
             
-            // Ánh xạ nhanh: Số ghế tuyệt đối -> Đối tượng ghế vật lý (Giải quyết triệt để lỗi khuyết số ghế/lối đi)
+            // Xây dựng bản đồ tọa độ Số ghế thực tế trong hàng
             Map<Integer, Seat> seatMapByNum = new HashMap<>();
             for (Seat s : rowSeats) {
                 try {
                     seatMapByNum.put(Integer.parseInt(s.getSeatNumber()), s);
-                } catch (NumberFormatException e) {
-                    // Phòng hờ trường hợp số ghế chứa ký tự lạ
-                }
+                } catch (NumberFormatException e) {}
             }
 
             for (Seat currentSeat : rowSeats) {
+                // 🎯 ĐIỀU KIỆN LOẠI TRỪ 1: Nếu là ghế đôi (SWEETBOX / COUPLE) thì THẢ XÍCH, bỏ qua không quét lỗi kẹp ghế lẻ!
+                String seatType = currentSeat.getSeatType() != null ? currentSeat.getSeatType().toUpperCase() : "NORMAL";
+                if ("SWEETBOX".equals(seatType) || "COUPLE".equals(seatType)) {
+                    continue; 
+                }
+
                 Long currentId = currentSeat.getId();
                 boolean isOccupied = alreadyOccupied.contains(currentId);
                 boolean isSelected = newlySelected.contains(currentId);
 
-                // CHỈ QUÉT: Những ghế thực sự còn TRỐNG sau khi giả định đơn hàng này đặt thành công
+                // CHỈ QUÉT: Những ghế còn TRỐNG sau khi user giả định bấm đặt hàng thành công
                 if (!isOccupied && !isSelected) {
                     int currentNum = Integer.parseInt(currentSeat.getSeatNumber());
 
-                    // --- KIỂM TRA BIÊN TRÁI (Số ghế tuyệt đối - 1) ---
+                    // --- KIỂM TRA BIÊN KẸP BÊN TRÁI (Số ghế - 1) ---
                     Seat leftSeat = seatMapByNum.get(currentNum - 1);
                     boolean leftBlocked = false;
                     boolean leftSelected = false;
+                    
                     if (leftSeat == null) {
-                        leftBlocked = true; // Không có ghế lân cận -> Tường rạp hoặc Lối đi (Hợp lệ)
+                        // Trái không có ghế -> Là TƯỜNG rạp hoặc LỐI ĐI. Biên này mở tự do, không tính là bị chặn cứng!
+                        leftBlocked = false; 
                     } else {
                         boolean leftOccupied = alreadyOccupied.contains(leftSeat.getId());
                         boolean leftSimSelected = newlySelected.contains(leftSeat.getId());
                         if (leftOccupied || leftSimSelected) {
-                            leftBlocked = true;
+                            leftBlocked = true; // Bị chặn bởi ghế đã mua hoặc ghế đang chọn
                             if (leftSimSelected) leftSelected = true;
                         }
                     }
 
-                    // --- KIỂM TRA BIÊN PHẢI (Số ghế tuyệt đối + 1) ---
+                    // --- KIỂM TRA BIÊN KẸP BÊN PHẢI (Số ghế + 1) ---
                     Seat rightSeat = seatMapByNum.get(currentNum + 1);
                     boolean rightBlocked = false;
                     boolean rightSelected = false;
+                    
                     if (rightSeat == null) {
-                        rightBlocked = true; // Không có ghế lân cận -> Tường rạp hoặc Lối đi (Hợp lệ)
+                        // Phải không có ghế -> Là TƯỜNG rạp hoặc LỐI ĐI. Biên này mở tự do, không tính là bị chặn cứng!
+                        rightBlocked = false; 
                     } else {
                         boolean rightOccupied = alreadyOccupied.contains(rightSeat.getId());
                         boolean rightSimSelected = newlySelected.contains(rightSeat.getId());
                         if (rightOccupied || rightSimSelected) {
-                            rightBlocked = true;
+                            rightBlocked = true; // Bị chặn bởi ghế đã mua hoặc ghế đang chọn
                             if (rightSimSelected) rightSelected = true;
                         }
                     }
 
-                    // NẾU HAI BÊN GHẾ TRỐNG ĐỀU BỊ CHẶN CỨNG -> ĐÂY LÀ GHẾ ĐƠN LẺ BỊ CÔ LẬP
+                    // 🎯 ĐIỀU KIỆN QUYẾT ĐỊNH CHUẨN CGV: Chỉ cấu thành lỗi nếu khe trống đơn lẻ này bị CHẶN CỨNG 2 ĐẦU GIỮA HÀNG
+                    // Nếu một trong 2 bên là Tường/Lối đi (leftBlocked hoặc rightBlocked bằng false) -> HỢP LỆ hoàn toàn, cho qua!
                     if (leftBlocked && rightBlocked) {
-                        // Chỉ cấu thành lỗi nếu khe trống cô lập này sinh ra trực tiếp do lượt chọn của chính user
+                        // Khe trống đơn lẻ nằm kẹt ở giữa hàng, và lỗi này trực tiếp sinh ra do lượt chọn ghế của user hiện tại
                         if (leftSelected || rightSelected) {
-                            throw new RuntimeException("Không được để lại ghế trống đơn lẻ (" + currentSeat.getName() + ") ở giữa hoặc đầu hàng!");
+                            throw new RuntimeException("Không được để lại ghế trống đơn lẻ (" + currentSeat.getName() + ") ở giữa hàng ghế!");
                         }
                     }
                 }
@@ -164,7 +163,6 @@ public class SeatServiceImpl implements SeatService {
     public List<Seat> generateSeatsForRoom(Long roomId, int numRows, int seatsPerRow) {
         validateRoomAccess(roomId);
 
-        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Nếu phòng đã được lên lịch chiếu -> Khóa tính năng tạo sơ đồ
         if (showtimeRepository.existsByRoom_Id(roomId)) {
             throw new RuntimeException("Phòng đã có suất chiếu, không thể chỉnh sửa hoặc làm lại sơ đồ ghế!");
         }
@@ -206,7 +204,6 @@ public class SeatServiceImpl implements SeatService {
     public Seat createSeat(SeatRequest request) {
         validateRoomAccess(request.getRoomId());
 
-        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Có suất chiếu hoạt động -> Cấm chèn lẻ thêm ghế mới
         if (showtimeRepository.existsByRoom_Id(request.getRoomId())) {
             throw new RuntimeException("Phòng đã có suất chiếu, không thể chèn thêm ghế mới!");
         }
@@ -247,7 +244,6 @@ public class SeatServiceImpl implements SeatService {
 
         validateRoomAccess(seat.getRoom().getId());
 
-        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Có suất chiếu hoạt động -> Cấm cập nhật thông tin/đổi loại ghế mẫu
         if (showtimeRepository.existsByRoom_Id(seat.getRoom().getId())) {
             throw new RuntimeException("Phòng đã có suất chiếu, không thể thay đổi thông tin sơ đồ ghế!");
         }
@@ -276,7 +272,6 @@ public class SeatServiceImpl implements SeatService {
         return seatRepository.save(seat);
     }
 
-    // ================= RÀNG BUỘC 3: KIỂM TRA ĐỊNH DẠNG CẶP GHẾ ĐÔI (SWEETBOX) =================
     private void validateSweetboxPairing(Long roomId, Seat targetSeat, boolean isUpdate) {
         if (!"SWEETBOX".equalsIgnoreCase(targetSeat.getSeatType())) return;
 
@@ -304,7 +299,6 @@ public class SeatServiceImpl implements SeatService {
 
         validateRoomAccess(seat.getRoom().getId());
 
-        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Có suất chiếu hoạt động -> Chặn đứng hành vi xóa ghế lẻ mẫu
         if (showtimeRepository.existsByRoom_Id(seat.getRoom().getId())) {
             throw new RuntimeException("Phòng đã có suất chiếu, không thể thực hiện xóa ghế!");
         }
@@ -331,7 +325,6 @@ public class SeatServiceImpl implements SeatService {
     public void deleteSeatsByRoom(Long roomId) {
         validateRoomAccess(roomId);
 
-        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Có suất chiếu hoạt động -> Khóa tính năng dọn sạch phòng mẫu
         if (showtimeRepository.existsByRoom_Id(roomId)) {
             throw new RuntimeException("Phòng đã có suất chiếu, không thể dọn sạch sơ đồ ghế!");
         }
@@ -339,14 +332,12 @@ public class SeatServiceImpl implements SeatService {
         seatRepository.deleteByRoomId(roomId);
     }
 
-    // ================= NEW METHOD: CHECK ELIGIBILITY FOR FRONTEND =================
     @Override
     public Map<String, Boolean> checkSeatEligibility(Long id) {
         Seat seat = seatRepository.findById(id).orElse(null);
         boolean canDelete = true;
 
         if (seat != null && seat.getRoom() != null) {
-            // 🎯 NẾU PHÒNG ĐÃ LÊN SUẤT CHIẾU -> Trả về false ngay để Next.js bật Lock Modal "Không thể xóa" lên
             if (showtimeRepository.existsByRoom_Id(seat.getRoom().getId())) {
                 canDelete = false;
             }
