@@ -43,8 +43,10 @@ public class SeatServiceImpl implements SeatService {
         List<Seat> seats = seatRepository.findByRoomId(showtime.getRoom().getId());
         List<Ticket> tickets = ticketRepository.findByShowtimeId(showtimeId);
 
+        // 🔥 ĐẢM BẢO AN TOÀN: Lọc loại trừ cuống vé null nếu có
         Set<Long> occupied = tickets.stream()
                 .filter(t -> !"CANCELLED".equalsIgnoreCase(t.getStatus()))
+                .filter(t -> t.getSeat() != null) 
                 .map(t -> t.getSeat().getId())
                 .collect(Collectors.toSet());
 
@@ -82,6 +84,7 @@ public class SeatServiceImpl implements SeatService {
 
         Set<Long> alreadyOccupied = tickets.stream()
                 .filter(t -> !"CANCELLED".equalsIgnoreCase(t.getStatus()))
+                .filter(t -> t.getSeat() != null) 
                 .map(t -> t.getSeat().getId())
                 .collect(Collectors.toSet());
 
@@ -161,6 +164,11 @@ public class SeatServiceImpl implements SeatService {
     public List<Seat> generateSeatsForRoom(Long roomId, int numRows, int seatsPerRow) {
         validateRoomAccess(roomId);
 
+        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Nếu phòng đã được lên lịch chiếu -> Khóa tính năng tạo sơ đồ
+        if (showtimeRepository.existsByRoom_Id(roomId)) {
+            throw new RuntimeException("Phòng đã có suất chiếu, không thể chỉnh sửa hoặc làm lại sơ đồ ghế!");
+        }
+
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
 
@@ -198,6 +206,11 @@ public class SeatServiceImpl implements SeatService {
     public Seat createSeat(SeatRequest request) {
         validateRoomAccess(request.getRoomId());
 
+        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Có suất chiếu hoạt động -> Cấm chèn lẻ thêm ghế mới
+        if (showtimeRepository.existsByRoom_Id(request.getRoomId())) {
+            throw new RuntimeException("Phòng đã có suất chiếu, không thể chèn thêm ghế mới!");
+        }
+
         Room room = roomRepository.findById(request.getRoomId())
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
 
@@ -233,6 +246,11 @@ public class SeatServiceImpl implements SeatService {
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy ghế"));
 
         validateRoomAccess(seat.getRoom().getId());
+
+        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Có suất chiếu hoạt động -> Cấm cập nhật thông tin/đổi loại ghế mẫu
+        if (showtimeRepository.existsByRoom_Id(seat.getRoom().getId())) {
+            throw new RuntimeException("Phòng đã có suất chiếu, không thể thay đổi thông tin sơ đồ ghế!");
+        }
 
         Room room = roomRepository.findById(request.getRoomId())
                 .orElseThrow(() -> new ResourceNotFoundException("Phòng không tồn tại"));
@@ -286,10 +304,11 @@ public class SeatServiceImpl implements SeatService {
 
         validateRoomAccess(seat.getRoom().getId());
 
-        if (ticketRepository.existsBySeatId(id)) {
-            throw new RuntimeException("Ghế đã có lịch sử đặt vé, không thể xóa!");
+        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Có suất chiếu hoạt động -> Chặn đứng hành vi xóa ghế lẻ mẫu
+        if (showtimeRepository.existsByRoom_Id(seat.getRoom().getId())) {
+            throw new RuntimeException("Phòng đã có suất chiếu, không thể thực hiện xóa ghế!");
         }
-
+        
         seatRepository.deleteById(id);
     }
 
@@ -311,18 +330,32 @@ public class SeatServiceImpl implements SeatService {
     @Transactional
     public void deleteSeatsByRoom(Long roomId) {
         validateRoomAccess(roomId);
+
+        // 🎯 RÀNG BUỘC KINH DOANH CHẶN TẬNG CỨNG: Có suất chiếu hoạt động -> Khóa tính năng dọn sạch phòng mẫu
+        if (showtimeRepository.existsByRoom_Id(roomId)) {
+            throw new RuntimeException("Phòng đã có suất chiếu, không thể dọn sạch sơ đồ ghế!");
+        }
+
         seatRepository.deleteByRoomId(roomId);
     }
 
     // ================= NEW METHOD: CHECK ELIGIBILITY FOR FRONTEND =================
     @Override
     public Map<String, Boolean> checkSeatEligibility(Long id) {
-        // Kiểm tra xem ghế này đã được mua vé nào chưa
-        boolean hasTickets = ticketRepository.existsBySeatId(id);
+        Seat seat = seatRepository.findById(id).orElse(null);
+        boolean canDelete = true;
+
+        if (seat != null && seat.getRoom() != null) {
+            // 🎯 NẾU PHÒNG ĐÃ LÊN SUẤT CHIẾU -> Trả về false ngay để Next.js bật Lock Modal "Không thể xóa" lên
+            if (showtimeRepository.existsByRoom_Id(seat.getRoom().getId())) {
+                canDelete = false;
+            }
+        } else {
+            canDelete = false;
+        }
         
         Map<String, Boolean> response = new HashMap<>();
-        // Nếu chưa có vé (hasTickets = false) -> canDelete = true (được phép xóa)
-        response.put("canDelete", !hasTickets); 
+        response.put("canDelete", canDelete); 
         return response;
     }
 

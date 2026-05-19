@@ -12,4 +12,5 @@ public class OrderDetailResponse {
     private Long itemId;
     private Integer quantity;
     private Double price;
+    private String itemName;
 }

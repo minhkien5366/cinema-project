@@ -39,7 +39,6 @@ public class OrderServiceImpl implements OrderService {
     private final VoucherService voucherService;
     private final SeatPriceConfigRepository seatPriceConfigRepository; 
     
-    // TIÊM THÊM DỊCH VỤ MAIL, WEBSOCKET VÀ SEAT VALIDATION
     private final MailService mailService;
     private final SimpMessagingTemplate messagingTemplate;
     private final SeatService seatService;
@@ -64,20 +63,15 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Suất chiếu này đã diễn ra, không thể đặt vé!");
         }
 
-        // 🔥 RÀNG BUỘC MỚI: Giới hạn tối đa đặt 6 ghế trong 1 đơn hàng (Bảo mật tầng cứng Backend)
         if (request.getSeatIds() != null && request.getSeatIds().size() > 6) {
             throw new RuntimeException("Mỗi giao dịch chỉ được đặt tối đa 6 ghế!");
         }
 
-        // ================= KÍCH HOẠT TEST CASE CHỐNG ĐỂ GHẾ TRỐNG ĐƠN LẺ =================
         if (request.getSeatIds() != null && !request.getSeatIds().isEmpty()) {
             seatService.validateSeatSelection(request.getShowtimeId(), request.getSeatIds());
         }
 
-        int javaDay = showtime.getStartTime()
-        .getDayOfWeek()
-        .getValue();
-
+        int javaDay = showtime.getStartTime().getDayOfWeek().getValue();
         int dayValue = (javaDay == 7) ? 8 : javaDay + 1;
 
         Order order = new Order();
@@ -90,30 +84,32 @@ public class OrderServiceImpl implements OrderService {
         double total = 0.0;
         List<OrderDetail> details = new ArrayList<>();
 
-        // Sinh 1 mã định danh duy nhất dùng chung cho toàn bộ vé thuộc đơn hàng này
         String commonBookingCode = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
 
         if (request.getSeatIds() != null) {
             for (Long seatId : request.getSeatIds()) {
                 Seat seat = seatRepository.findById(seatId).orElseThrow(() -> new ResourceNotFoundException("Ghế không tồn tại"));
                 
-                // 🔥 FIX ĐẮT GIÁ TẠI ĐÂY: Chỉ chặn nếu ghế đã có vé trạng thái khác CANCELLED
-                // Nếu vé cũ có trạng thái CANCELLED, hệ thống bỏ qua và cho phép đặt bình thường
                 if (ticketRepository.existsBySeatAndShowtimeAndStatusNotIgnoreCase(seat, showtime, "CANCELLED")) {
                     throw new RuntimeException("Ghế " + seat.getName() + " đã có người đặt!");
                 }
 
                 Double dynamicPrice = seatPriceConfigRepository
-                    .findBySeatTypeAndDayOfWeek(
-                        seat.getSeatType().toUpperCase(),
-                        dayValue
-                    )
+                    .findBySeatTypeAndDayOfWeek(seat.getSeatType().toUpperCase(), dayValue)
                     .map(SeatPriceConfig::getPrice)
                     .orElse(seat.getPrice());
 
+                // 🔥 UPDATE ĐẮT GIÁ: Ghi đè đầy đủ 3 trường dữ liệu Snapshot của ghế vào cuống vé Ticket
                 Ticket ticket = Ticket.builder()
-                    .seat(seat).showtime(showtime).user(user).price(dynamicPrice)
-                    .status("BOOKED").bookingCode(commonBookingCode) // Đồng bộ 1 mã chung cho cả Order
+                    .seat(seat)
+                    .showtime(showtime)
+                    .user(user)
+                    .price(dynamicPrice)
+                    .status("BOOKED")
+                    .bookingCode(commonBookingCode) 
+                    .seatRow(seat.getSeatRow())       // Lưu Snapshot Hàng ghế
+                    .seatNumber(seat.getSeatNumber()) // Lưu Snapshot Số ghế
+                    .seatName(seat.getName())         // Lưu Snapshot Tên ghế (Ví dụ: A5)
                     .build();
                 ticketRepository.save(ticket);
 
@@ -209,7 +205,13 @@ public class OrderServiceImpl implements OrderService {
                 if ("TICKET".equals(d.getItemType())) {
                     ticketRepository.findBySeatIdAndShowtimeId(d.getItemId(), orderRepository.findShowtimeIdByOrderId(order.getId()))
                         .ifPresent(t -> {
-                            t.setStatus(status.equals("PAID") ? "PAID" : "CANCELLED");
+                            if ("PAID".equals(status)) {
+                                t.setStatus("PAID");
+                            } else if ("CANCELLED".equals(status)) {
+                                t.setStatus("CANCELLED");
+                            } else if ("USED".equals(status)) {
+                                t.setStatus("USED");
+                            }
                             ticketRepository.save(t);
                         });
                 }
@@ -218,23 +220,75 @@ public class OrderServiceImpl implements OrderService {
         
         Order savedOrder = orderRepository.save(order);
         
-        // KHI THANH TOÁN THÀNH CÔNG (PAID)
         if ("PAID".equals(status)) {
-            // 1. Gửi Email chi tiết đơn hàng (Chạy qua MailServiceImpl @Async)
             mailService.sendOrderConfirmation(savedOrder);
 
-            // 2. Bắn thông báo Real-time cho Admin
             Map<String, Object> adminNotify = new HashMap<>();
             adminNotify.put("message", "Có đơn hàng mới!");
             adminNotify.put("orderId", savedOrder.getId());
             adminNotify.put("customer", savedOrder.getUser().getFirstName() + " " + savedOrder.getUser().getLastName());
             adminNotify.put("total", savedOrder.getTotalAmount());
             
-            // Ép kiểu String cho tham số đầu tiên và Object cho tham số thứ hai
-            messagingTemplate.convertAndSend((String) "/topic/admin-notifications", (Object) adminNotify);        
+            messagingTemplate.convertAndSend((String) "/topic/admin-notifications", (String) "/topic/admin-notifications", adminNotify);        
         }
 
         return mapToResponse(savedOrder);
+    }
+
+    // ================= 🔥 LUỒNG NÂNG CAO 1: KIỂM TRA QUÉT MÃ QR TẠI QUẦY =================
+    @Override
+    public OrderResponse scanOrderTicket(Long orderId) {
+        User staff = getCurrentUser();
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Đơn hàng #" + orderId + " không tồn tại trên hệ thống!"));
+
+        // RÀNG BUỘC 1: Super Admin tuyệt đối không được tự ý thực hiện soát vé tại quầy
+        if (isSuperAdmin(staff)) {
+            throw new RuntimeException("Tài khoản Super Admin không có quyền soát vé trực tiếp tại quầy!");
+        }
+
+        // RÀNG BUỘC 2: Chỉ cho phép quét đúng chi nhánh rạp được giao quản lý
+        if (staff.getManagedCinemaItemId() == null || !staff.getManagedCinemaItemId().equals(order.getCinemaItem().getId())) {
+            throw new RuntimeException("Xâm nhập sai chi nhánh! Vé này thuộc cụm rạp '" + order.getCinemaItem().getName() + "'.");
+        }
+
+        // RÀNG BUỘC 3: Bóc tách và từ chối chi tiết theo từng trạng thái lỗi
+        String currentStatus = order.getStatus().toUpperCase();
+        switch (currentStatus) {
+            case "USED":
+                throw new RuntimeException("CẢNH BÁO GIAN LẬN: Mã QR này đã được quét sử dụng trước đó!");
+            case "CANCELLED":
+                throw new RuntimeException("Vé lỗi: Đơn hàng này đã bị hủy bỏ hoặc hoàn tiền trên hệ thống!");
+            case "PENDING":
+                throw new RuntimeException("Vé chưa kích hoạt: Đơn hàng vẫn ở trạng thái chờ thanh toán!");
+            case "PAID":
+                break; 
+            default:
+                throw new RuntimeException("Trạng thái đơn hàng không hợp lệ để soát vé: " + currentStatus);
+        }
+
+        // RÀNG BUỘC NÂNG CAO 4: Kiểm tra thời hạn suất chiếu (Hết hạn quá 2 tiếng không cho soát vé)
+        Long showtimeId = orderRepository.findShowtimeIdByOrderId(order.getId());
+        if (showtimeId != null) {
+            showtimeRepository.findById(showtimeId).ifPresent(showtime -> {
+                if (showtime.getStartTime().plusHours(2).isBefore(LocalDateTime.now())) {
+                    throw new RuntimeException("Vé không còn giá trị! Suất chiếu của phim này đã kết thúc.");
+                }
+            });
+        }
+
+        return mapToResponse(order);
+    }
+
+    // ================= 🔥 LUỒNG NÂNG CAO 2: XÁC NHẬN SỬ DỤNG VÉ (BẤM NÚT TRÊN FE) =================
+    @Override
+    @Transactional
+    public OrderResponse confirmCheckIn(Long orderId) {
+        // Thực hiện lại một lượt kiểm tra an toàn (Idempotency) để phòng ngừa bấm nút 2 lần
+        scanOrderTicket(orderId);
+        
+        // Gọi hàm update có sẵn để đồng bộ Order + Tickets sang trạng thái USED
+        return updateOrderStatus(orderId, "USED");
     }
 
     @Override 
@@ -242,14 +296,12 @@ public class OrderServiceImpl implements OrderService {
         User user = getCurrentUser();
         Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
         
-        // Cách 2: Fix chuẩn logic phân quyền bảo mật
         if (isSuperAdmin(user)) {
             return orderRepository.findAll(sort).stream()
                     .map(this::mapToResponse)
                     .collect(Collectors.toList());
         }
         
-        // Nếu managedCinemaItemId bị null, tạm thời trả về toàn bộ thay vì chặn đứng dữ liệu rỗng
         if (user.getManagedCinemaItemId() == null) {
             return orderRepository.findAll(sort).stream()
                     .map(this::mapToResponse)
@@ -284,15 +336,49 @@ public class OrderServiceImpl implements OrderService {
         if (user.getManagedCinemaItemId() == null || !user.getManagedCinemaItemId().equals(cinemaId)) throw new RuntimeException("Không có quyền!"); 
     }
 
+    // ================= 🔥 UPDATE ĐẮT GIÁ: ĐỔI TÊN ITEM THÀNH SNAPSHOT GHẾ THỰC TẾ =================
     private OrderResponse mapToResponse(Order order) {
+        // Lấy ID suất chiếu để phục vụ truy vấn Ticket Snapshot
+        Long showtimeId = orderRepository.findShowtimeIdByOrderId(order.getId());
+
+        List<OrderDetailResponse> detailResponses = order.getOrderDetails().stream().map(d -> {
+            String name = "";
+            
+            if ("TICKET".equals(d.getItemType())) {
+                // 🎯 ĐỌC SNAPSHOT CỨNG: Lôi thẳng thông tin hàng ghế, số ghế từ Snapshot lưu trong Ticket ra
+                if (showtimeId != null) {
+                    name = ticketRepository.findBySeatIdAndShowtimeId(d.getItemId(), showtimeId)
+                            .map(t -> "Ghế " + t.getSeatName() + " (Hàng " + t.getSeatRow() + " - Số " + t.getSeatNumber() + ")")
+                    .orElse("Vé Xem Phim");
+                } else {
+                    name = "Vé Xem Phim";
+                }
+            } else {
+                // Đọc tên Combo từ bảng Combo
+                name = comboRepository.findById(d.getItemId())
+                        .map(Combo::getName)
+                        .orElse("Combo Bắp Nước");
+            }
+
+            return OrderDetailResponse.builder()
+                    .id(d.getId())
+                    .itemId(d.getItemId())
+                    .itemType(d.getItemType())
+                    .quantity(d.getQuantity())
+                    .price(d.getPrice())
+                    .itemName(name) // Nạp chuỗi text mô tả chi tiết vật phẩm sang DTO trả về cho FE
+                    .build();
+        }).collect(Collectors.toList());
+
         return OrderResponse.builder()
-                .id(order.getId()).status(order.getStatus()).totalAmount(order.getTotalAmount())
-                .paymentMethod(order.getPaymentMethod()).createdAt(order.getCreatedAt())
+                .id(order.getId())
+                .status(order.getStatus())
+                .totalAmount(order.getTotalAmount())
+                .paymentMethod(order.getPaymentMethod())
+                .createdAt(order.getCreatedAt())
                 .cinemaItemId(order.getCinemaItem() != null ? order.getCinemaItem().getId() : null)
                 .cinemaName(order.getCinemaItem() != null ? order.getCinemaItem().getName() : "N/A")
-                .orderDetails(order.getOrderDetails().stream().map(d -> OrderDetailResponse.builder()
-                        .id(d.getId()).itemId(d.getItemId()).itemType(d.getItemType())
-                        .quantity(d.getQuantity()).price(d.getPrice()).build()).collect(Collectors.toList()))
+                .orderDetails(detailResponses) // Trả về danh sách chi tiết vật phẩm đã bồi tên xịn
                 .build();
     }
 }

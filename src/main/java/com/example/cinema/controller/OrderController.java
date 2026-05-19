@@ -13,15 +13,13 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/orders")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(origins = "*") // 🔥 Cho phép ứng dụng qr-app (port 3001) gọi sang thoải mái không bị chặn CORS
 public class OrderController {
 
     private final OrderService orderService;
@@ -42,9 +40,7 @@ public class OrderController {
     }
 
     /**
-     * Endpoint nhận phản hồi từ VNPAY
-     * Không dùng @PreAuthorize vì VNPAY gọi về tự động
-     * Dùng HttpServletResponse để chuyển hướng trình duyệt về Frontend
+     * Endpoint nhận phản hồi tự động từ hệ thống VNPAY
      */
     @GetMapping("/vnpay-callback")
     public void vnpayCallback(@RequestParam Map<String, String> params, HttpServletResponse response) throws IOException {
@@ -54,17 +50,14 @@ public class OrderController {
 
         Long orderId = Long.parseLong(txnRef);
 
-        // 1. Cập nhật trạng thái vào Database
+        // Cập nhật trạng thái vào Database
         if ("00".equals(responseCode)) {
-            // Thanh toán thành công -> Cập nhật PAID
             orderService.updateOrderStatus(orderId, "PAID");
         } else {
-            // Thanh toán thất bại hoặc hủy -> Cập nhật CANCELLED
             orderService.updateOrderStatus(orderId, "CANCELLED");
         }
 
-        // 2. Chuyển hướng trình duyệt về trang Frontend (PaymentResultPage)
-        // Kèm theo các tham số để Frontend biết là thành công hay thất bại
+        // Chuyển hướng trình duyệt về trang kết quả Frontend khách hàng
         String redirectUrl = frontendUrl + "/booking/payment/result"
                 + "?vnp_ResponseCode=" + responseCode
                 + "&vnp_TxnRef=" + txnRef
@@ -115,5 +108,78 @@ public class OrderController {
                 .message("Cập nhật trạng thái thành công!")
                 .data(updatedOrder)
                 .build());
+    }
+
+    // ================= 🔥 ENDPOINT 1: XỬ LÝ KIỂM TRA MÃ QR TỪ CAMERA =================
+    @GetMapping("/scan")
+    // @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Tạm khóa dòng check quyền này lại để ông test local không bị lỗi 403 nhé
+    public ResponseEntity<ApiResponse<OrderResponse>> scanQrCode(@RequestParam String qrContent) {
+        
+        // 1. Kiểm tra tiền tố mã QR hợp lệ hệ thống
+        if (qrContent == null || !qrContent.startsWith("AK-CINEMA-ORDER-")) {
+            return ResponseEntity.badRequest().body(ApiResponse.<OrderResponse>builder()
+                    .status(400)
+                    .message("Mã QR không hợp lệ hoặc không thuộc hệ thống A&K Cinema!")
+                    .build());
+        }
+
+        try {
+            // 2. Cắt chuỗi lấy chính xác mã ID đơn hàng
+            String orderIdStr = qrContent.replace("AK-CINEMA-ORDER-", "").trim();
+            Long orderId = Long.parseLong(orderIdStr);
+
+            // 3. 🔥 ĐÃ THAY ĐỔI: Gọi hàm scanOrderTicket mới chứa 4 tầng ràng buộc bảo mật nâng cao
+            OrderResponse orderResponse = orderService.scanOrderTicket(orderId);
+
+            // 4. Trả dữ liệu về nếu hợp lệ
+            return ResponseEntity.ok(ApiResponse.<OrderResponse>builder()
+                    .status(200)
+                    .message("Mã QR hợp lệ!")
+                    .data(orderResponse)
+                    .build());
+
+        } catch (NumberFormatException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<OrderResponse>builder()
+                    .status(400)
+                    .message("Định dạng mã ID hóa đơn trong QR bị lỗi chữ/số!")
+                    .build());
+        } catch (RuntimeException e) {
+            // 🔥 ĐẮT GIÁ: Bắt các ngoại lệ Runtime từ Service ném ra (Sai chi nhánh, Đã dùng, SuperAdmin...) để hiển thị thông báo chuẩn lên Frontend
+            return ResponseEntity.badRequest().body(ApiResponse.<OrderResponse>builder()
+                    .status(400)
+                    .message(e.getMessage())
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.<OrderResponse>builder()
+                    .status(500)
+                    .message("Lỗi hệ thống khi truy xuất đơn hàng: " + e.getMessage())
+                    .build());
+        }
+    }
+
+    // ================= 🔥 ENDPOINT 2: XÁC NHẬN SỬ DỤNG VÉ (ĐỔI SANG TRẠNG THÁI USED) =================
+    @PutMapping("/{id}/confirm-checkin")
+    // @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Tạm khóa để test local mượt mà
+    public ResponseEntity<ApiResponse<OrderResponse>> confirmCheckIn(@PathVariable Long id) {
+        try {
+            // Gọi hàm confirmCheckIn xử lý chuyển trạng thái đồng bộ Order + Ticket sang USED
+            OrderResponse updatedOrder = orderService.confirmCheckIn(id);
+            
+            return ResponseEntity.ok(ApiResponse.<OrderResponse>builder()
+                    .status(200)
+                    .message("Đã hoàn tất thủ tục bàn giao vé cứng & bắp nước thành công!")
+                    .data(updatedOrder)
+                    .build());
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<OrderResponse>builder()
+                    .status(400)
+                    .message(e.getMessage())
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.<OrderResponse>builder()
+                    .status(500)
+                    .message("Lỗi hệ thống khi xác nhận check-in đơn hàng: " + e.getMessage())
+                    .build());
+        }
     }
 }

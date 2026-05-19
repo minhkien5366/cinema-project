@@ -15,6 +15,8 @@ public interface ShowtimeRepository extends JpaRepository<Showtime, Long> {
     List<Showtime> findByMovieId(Long movieId);
     List<Showtime> findByCinemaItem_Id(Long cinemaItemId);
     List<Showtime> findByRoomId(Long roomId);
+    // 🔥 THÊM DÒNG NÀY: Kiểm tra xem phòng chiếu (Room ID) đã dính bất kỳ suất chiếu nào chưa
+    boolean existsByRoom_Id(Long roomId);
 
     // Kiểm tra trùng lịch kèm buffer 20 phút dọn phòng
     @Query("SELECT s FROM Showtime s WHERE s.room.id = :roomId " +
