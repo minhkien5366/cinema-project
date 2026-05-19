@@ -21,7 +21,6 @@ public class Ticket {
 
     private Double price;
 
-    // BOOKED | PAID | CANCELLED
     private String status;
 
     private String bookingCode;

@@ -16,7 +16,7 @@ public class Order {
     private Long id;
 
     private Double totalAmount;
-    private String status;         // PENDING, PAID, CANCELLED
+    private String status;        
     private String paymentMethod;  
 
     @ManyToOne
@@ -24,7 +24,6 @@ public class Order {
     @JsonIgnoreProperties({"password", "roles", "managedCinemaItemId"})
     private User user;
 
-    // QUAN TRỌNG: Để Admin chi nhánh lọc đơn hàng
     @ManyToOne
     @JoinColumn(name = "cinema_item_id")
     private CinemaItem cinemaItem;
