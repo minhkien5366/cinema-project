@@ -44,7 +44,9 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     // --- FIX LỖI 2: Ràng buộc đã thanh toán vé (Dù phim chưa chiếu) ---
     boolean existsByUser_UserIdAndShowtime_Movie_IdAndStatus(Long userId, Long movieId, String status);
 
-    Optional<Ticket> findBySeatIdAndShowtimeId(Long seatId, Long showtimeId);
+    // 🔥 UPDATE ĐẮT GIÁ: Đổi từ Optional sang List để ôm trọn toàn bộ cuống vé kẹt của vị trí ghế đó
+    List<Ticket> findBySeatIdAndShowtimeId(Long seatId, Long showtimeId);
+    
     boolean existsBySeatAndShowtimeAndStatusNotIgnoreCase(Seat seat, Showtime showtime, String status);
 
     @Query("SELECT t.seat FROM Ticket t WHERE t.showtime.id = :showtimeId AND t.status IN ('BOOKED', 'PAID')")
