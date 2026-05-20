@@ -102,6 +102,7 @@ public class UserServiceImpl implements UserService {
                 .roles(user.getRoles().stream()
                         .map(Role::getRoleName)
                         .collect(Collectors.toSet()))
+                    .points(user.getPoints())
                 .build();
     }
 }

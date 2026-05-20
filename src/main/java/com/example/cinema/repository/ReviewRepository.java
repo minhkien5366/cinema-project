@@ -18,4 +18,10 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
 
     // FIX LỖI: Thêm dấu gạch dưới để truy cập đúng trường userId của Entity User
     boolean existsByUser_UserIdAndMovieId(Long userId, Long movieId);
+
+    @Query("SELECT r.movie.title, AVG(r.rating), COUNT(r.id) " +
+           "FROM Review r " +
+           "GROUP BY r.movie.id, r.movie.title " +
+           "ORDER BY AVG(r.rating) DESC")
+    List<Object[]> getTopRatedMovies();
 }

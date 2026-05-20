@@ -23,4 +23,5 @@ public class UserResponse {
     private LocalDate dateOfBirth; // THÊM DÒNG NÀY
     private Long managedCinemaItemId; // Thêm trường này
     private Set<String> roles;
+    private Integer points;
 }

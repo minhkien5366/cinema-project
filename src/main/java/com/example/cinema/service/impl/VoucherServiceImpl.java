@@ -58,30 +58,56 @@ public class VoucherServiceImpl implements VoucherService {
     }
 
     @Override
-    public Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double currentTotal) {
-        // cinemaItemId giờ không dùng để lọc trong DB nữa nhưng vẫn giữ ở param để tránh lỗi compile các chỗ gọi hàm này
-        Voucher v = voucherRepository.findByCode(code.toUpperCase())
-                .orElseThrow(() -> new ResourceNotFoundException("Mã giảm giá không hợp lệ!"));
+@Transactional
+public Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double currentTotal) {
 
-        LocalDateTime now = LocalDateTime.now();
-        
-        if (v.getStartDate() != null && now.isBefore(v.getStartDate())) {
-            throw new RuntimeException("Mã giảm giá chưa đến thời gian áp dụng!");
-        }
-        if (v.getEndDate() != null && now.isAfter(v.getEndDate())) {
-            throw new RuntimeException("Mã giảm giá đã hết hạn sử dụng!");
-        }
-        if (v.getUsedCount() >= v.getUsageLimit()) {
-            throw new RuntimeException("Mã giảm giá đã hết lượt sử dụng!");
-        }
-        if (currentTotal < v.getMinOrderAmount()) {
-            throw new RuntimeException("Đơn hàng chưa đủ điều kiện tối thiểu (" + String.format("%,.0f", v.getMinOrderAmount()) + "đ)");
-        }
-        
-        // ĐÃ GỠ BỎ LOGIC KIỂM TRA CINEMA_ITEM
-        return v;
+    Voucher v = voucherRepository.findByCode(code.toUpperCase())
+            .orElseThrow(() -> new ResourceNotFoundException("Mã giảm giá không hợp lệ!"));
+
+    LocalDateTime now = LocalDateTime.now();
+
+    if (v.getStartDate() != null && now.isBefore(v.getStartDate())) {
+        throw new RuntimeException("Mã giảm giá chưa đến thời gian áp dụng!");
     }
 
+    if (v.getEndDate() != null && now.isAfter(v.getEndDate())) {
+        throw new RuntimeException("Mã giảm giá đã hết hạn sử dụng!");
+    }
+
+    if (v.getUsedCount() >= v.getUsageLimit()) {
+        throw new RuntimeException("Mã giảm giá đã hết lượt sử dụng!");
+    }
+
+    if (currentTotal < v.getMinOrderAmount()) {
+        throw new RuntimeException(
+                "Đơn hàng chưa đủ điều kiện tối thiểu (" +
+                String.format("%,.0f", v.getMinOrderAmount()) + "đ)");
+    }
+
+    // ===== LẤY USER ĐANG LOGIN =====
+    String email = SecurityContextHolder.getContext()
+            .getAuthentication()
+            .getName();
+
+    User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new ResourceNotFoundException("User không tồn tại"));
+
+    // ===== KIỂM TRA USER CÓ VOUCHER KHÔNG =====
+    boolean hasVoucher = user.getVouchers()
+            .stream()
+            .anyMatch(uv -> uv.getId().equals(v.getId()));
+
+    if (!hasVoucher) {
+        throw new RuntimeException("Bạn chưa lưu mã này trong kho!");
+    }
+
+    // ===== XOÁ KHỎI KHO USER =====
+    user.getVouchers().removeIf(uv -> uv.getId().equals(v.getId()));
+
+    userRepository.save(user);
+
+    return v;
+}
     @Override
     @Transactional
     public void saveVoucherToUser(Long userId, Long voucherId) {
@@ -173,4 +199,47 @@ public class VoucherServiceImpl implements VoucherService {
             throw new RuntimeException("Quyền truy cập bị từ chối: Yêu cầu quyền Super Admin!");
         }
     }
+
+    @Transactional
+public void redeemVoucher(Long voucherId) {
+
+    // lấy user đang login
+    String email = SecurityContextHolder
+            .getContext()
+            .getAuthentication()
+            .getName();
+
+    User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new ResourceNotFoundException("User không tồn tại"));
+
+    Voucher voucher = voucherRepository.findById(voucherId)
+            .orElseThrow(() -> new ResourceNotFoundException("Voucher không tồn tại"));
+
+    // ❌ voucher không cho đổi điểm
+    if (voucher.getCostPoints() == null || voucher.getCostPoints() <= 0) {
+        throw new RuntimeException("Voucher này không thể đổi bằng điểm");
+    }
+
+    // ❌ không đủ điểm
+    if (user.getPoints() < voucher.getCostPoints()) {
+        throw new RuntimeException("Không đủ điểm");
+    }
+
+    // ❌ đổi rồi
+    boolean existed = user.getVouchers()
+            .stream()
+            .anyMatch(v -> v.getId().equals(voucherId));
+
+    if (existed) {
+        throw new RuntimeException("Bạn đã đổi voucher này rồi");
+    }
+
+    // ✅ trừ điểm
+    user.setPoints(user.getPoints() - voucher.getCostPoints());
+
+    // ✅ thêm voucher vào user
+    user.getVouchers().add(voucher);
+
+    userRepository.save(user);
+}
 }

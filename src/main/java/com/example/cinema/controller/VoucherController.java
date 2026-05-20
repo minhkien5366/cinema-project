@@ -75,7 +75,15 @@ public class VoucherController {
                 .data(voucherService.getVouchersByUser(user.getUserId()))
                 .build());
     }
-
+        @PostMapping("/redeem/{voucherId}")
+@PreAuthorize("isAuthenticated()")
+public ResponseEntity<ApiResponse<String>> redeem(@PathVariable Long voucherId) {
+    voucherService.redeemVoucher(voucherId);
+    return ResponseEntity.ok(ApiResponse.<String>builder()
+            .status(200)
+            .message("Đổi voucher thành công! Mã đã vào ví.")
+            .build());
+}
     // --- DÀNH CHO QUẢN TRỊ (ADMIN) ---
 
     @GetMapping
@@ -108,4 +116,6 @@ public class VoucherController {
         return ResponseEntity.ok(ApiResponse.<String>builder()
                 .status(200).message("Xóa mã thành công").build());
     }
+
+
 }

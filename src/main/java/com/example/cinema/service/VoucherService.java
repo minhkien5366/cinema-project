@@ -20,4 +20,5 @@ public interface VoucherService {
     List<Voucher> getVouchersByUser(Long userId);
 
     Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double currentTotal);
+    void redeemVoucher(Long voucherId);
 }
