@@ -52,4 +52,7 @@ public class User {
         inverseJoinColumns = @JoinColumn(name = "voucher_id")
     )
     private List<Voucher> vouchers = new ArrayList<>();
+
+    @Column(nullable = false)
+    private Integer points = 0;
 }

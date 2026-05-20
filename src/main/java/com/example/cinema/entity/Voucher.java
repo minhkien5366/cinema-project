@@ -39,4 +39,5 @@ public class Voucher {
     @ManyToOne
     @JoinColumn(name = "promotion_id")
     private Promotion promotion;
+    private Integer costPoints;
 }

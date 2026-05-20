@@ -1,10 +1,11 @@
 package com.example.cinema.service;
 
-import com.example.cinema.dto.RevenueDTO;
-
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
-
+import java.util.Map;
 public interface ReportService {
-    List<RevenueDTO> getRevenue(LocalDateTime start, LocalDateTime end);
+    ByteArrayInputStream exportRevenueReport(Long cinemaId, LocalDateTime start, LocalDateTime end) throws IOException;
+    List<Map<String, Object>> getCinemaRankingData(LocalDateTime start, LocalDateTime end);
 }
