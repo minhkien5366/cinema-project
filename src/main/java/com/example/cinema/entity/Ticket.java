@@ -4,15 +4,16 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
-
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "tickets")
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@ToString
 public class Ticket {
 
     @Id
@@ -20,16 +21,9 @@ public class Ticket {
     private Long id;
 
     private Double price;
-
     private String status;
-
     private String bookingCode;
 
-    /*
-     * IMPORTANT:
-     * Seat có thể bị xóa nhưng vé phải còn
-     * => ON DELETE SET NULL
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(
             name = "seat_id",
@@ -40,30 +34,23 @@ public class Ticket {
             )
     )
     @JsonIgnoreProperties({"room"})
+    @ToString.Exclude // Ngắt chuỗi quét vòng lặp với thực thể Seat
     private Seat seat;
 
-    /*
-     * Snapshot dữ liệu ghế
-     * Giữ lịch sử khi seat bị xóa
-     */
     private String seatRow;
     private String seatNumber;
     private String seatName;
 
-    /*
-     * Showtime
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "showtime_id")
     @JsonIgnoreProperties({"cinemaItem", "room"})
+    @ToString.Exclude // Ngắt chuỗi quét với Showtime
     private Showtime showtime;
 
-    /*
-     * User mua vé
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     @JsonIgnoreProperties({"password", "roles", "managedCinemaItemId"})
+    @ToString.Exclude // Ngắt chuỗi quét với User mua vé
     private User user;
 
     @CreationTimestamp

@@ -1,13 +1,17 @@
 package com.example.cinema.entity;
 
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.ToString;
 import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "order_details")
-@Data
+@Getter
+@Setter
+@ToString
 public class OrderDetail {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -17,8 +21,9 @@ public class OrderDetail {
     private Integer quantity;
     private Double price;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY) // Ép LAZY để tải mượt hơn
     @JoinColumn(name = "order_id")
+    @ToString.Exclude // 🎯 CHÍ MẠNG: Ngắt đệ quy, cấm không cho gọi ngược lên bảng cha Order
     private Order order;
 
     @CreationTimestamp
