@@ -10,6 +10,6 @@ public interface OrderService {
     List<OrderResponse> getMyOrders();
     List<OrderResponse> getAllOrders(); // Lọc theo quyền Admin
     OrderResponse updateOrderStatus(Long orderId, String newStatus);
-    OrderResponse scanOrderTicket(Long orderId);
+OrderResponse scanOrderTicket(String bookingCode);
 OrderResponse confirmCheckIn(Long orderId);
 }

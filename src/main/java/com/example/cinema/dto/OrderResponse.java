@@ -17,5 +17,14 @@ public class OrderResponse {
     private Long cinemaItemId;
     private String cinemaName;
     private List<OrderDetailResponse> orderDetails;
-    private String paymentUrl; // <--- THÊM DÒNG NÀY
+    private String paymentUrl;
+
+    // 🎯 THÊM DÒNG NÀY: Để đảm bảo QR Code quét ra chính xác mã trong DB
+    private String bookingCode;
+
+    // Các trường suất chiếu đã thêm
+    private String movieTitle;
+    private String date;
+    private String time;
+    private String roomName;
 }

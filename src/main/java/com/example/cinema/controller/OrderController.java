@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import com.example.cinema.exception.ResourceNotFoundException;
 
 import java.io.IOException;
 import java.util.List;
@@ -110,41 +111,43 @@ public class OrderController {
                 .build());
     }
 
-    // ================= 🔥 ENDPOINT 1: XỬ LÝ KIỂM TRA MÃ QR TỪ CAMERA =================
+    // ================= 🔥 ENDPOINT 1: XỬ LÝ KIỂM TRA MÃ QR TOÀN DIỆN (CHẤP CẢ VỎ CỦA FE CŨ LẪN MỚI) =================
     @GetMapping("/scan")
-    // @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Tạm khóa dòng check quyền này lại để ông test local không bị lỗi 403 nhé
-    public ResponseEntity<ApiResponse<OrderResponse>> scanQrCode(@RequestParam String qrContent) {
+    // @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Tạm khóa để ông test local mượt mà không dính 403
+    public ResponseEntity<ApiResponse<OrderResponse>> scanQrCode(
+            @RequestParam(value = "bookingCode", required = false) String bookingCode,
+            @RequestParam(value = "qrContent", required = false) String qrContent) {
         
-        // 1. Kiểm tra tiền tố mã QR hợp lệ hệ thống
-        if (qrContent == null || !qrContent.startsWith("AK-CINEMA-ORDER-")) {
+        // 🎯 CƠ CHẾ PHÒNG VỆ: Frontend truyền key nào lên (bookingCode hay qrContent) hệ thống đều tự bắt được
+        String finalCode = (bookingCode != null && !bookingCode.trim().isEmpty()) ? bookingCode : qrContent;
+
+        if (finalCode == null || finalCode.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(ApiResponse.<OrderResponse>builder()
                     .status(400)
-                    .message("Mã QR không hợp lệ hoặc không thuộc hệ thống A&K Cinema!")
+                    .message("Mã đặt vé trống hoặc không hợp lệ, không thể thực hiện tra cứu!")
                     .build());
         }
 
         try {
-            // 2. Cắt chuỗi lấy chính xác mã ID đơn hàng
-            String orderIdStr = qrContent.replace("AK-CINEMA-ORDER-", "").trim();
-            Long orderId = Long.parseLong(orderIdStr);
+            // Loại bỏ tiền tố chuỗi cứng cũ nếu Frontend lỡ đính kèm vào mã QR
+            String cleanCode = finalCode.replace("AK-CINEMA-ORDER-", "").trim();
 
-            // 3. 🔥 ĐÃ THAY ĐỔI: Gọi hàm scanOrderTicket mới chứa 4 tầng ràng buộc bảo mật nâng cao
-            OrderResponse orderResponse = orderService.scanOrderTicket(orderId);
+            // 🔥 THỰC THI CHUẨN: Gọi hàm quét theo chuỗi ký tự String bookingCode đã làm sạch
+            OrderResponse orderResponse = orderService.scanOrderTicket(cleanCode);
 
-            // 4. Trả dữ liệu về nếu hợp lệ
             return ResponseEntity.ok(ApiResponse.<OrderResponse>builder()
                     .status(200)
-                    .message("Mã QR hợp lệ!")
+                    .message("Xác thực mã đặt vé thành công!")
                     .data(orderResponse)
                     .build());
 
-        } catch (NumberFormatException e) {
-            return ResponseEntity.badRequest().body(ApiResponse.<OrderResponse>builder()
-                    .status(400)
-                    .message("Định dạng mã ID hóa đơn trong QR bị lỗi chữ/số!")
+        } catch (ResourceNotFoundException e) {
+            return ResponseEntity.status(404).body(ApiResponse.<OrderResponse>builder()
+                    .status(404)
+                    .message(e.getMessage())
                     .build());
         } catch (RuntimeException e) {
-            // 🔥 ĐẮT GIÁ: Bắt các ngoại lệ Runtime từ Service ném ra (Sai chi nhánh, Đã dùng, SuperAdmin...) để hiển thị thông báo chuẩn lên Frontend
+            // Trả trực tiếp các câu Runtime thông minh: "CẢNH BÁO GIAN LẬN", "Sai chi nhánh", "Vé hết hạn" về màn hình POS
             return ResponseEntity.badRequest().body(ApiResponse.<OrderResponse>builder()
                     .status(400)
                     .message(e.getMessage())
@@ -152,17 +155,17 @@ public class OrderController {
         } catch (Exception e) {
             return ResponseEntity.status(500).body(ApiResponse.<OrderResponse>builder()
                     .status(500)
-                    .message("Lỗi hệ thống khi truy xuất đơn hàng: " + e.getMessage())
+                    .message("Lỗi hệ thống khi truy xuất mã vé: " + e.getMessage())
                     .build());
         }
     }
 
     // ================= 🔥 ENDPOINT 2: XÁC NHẬN SỬ DỤNG VÉ (ĐỔI SANG TRẠNG THÁI USED) =================
     @PutMapping("/{id}/confirm-checkin")
-    // @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Tạm khóa để test local mượt mà
+    // @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Tạm khóa để thuận tiện test luồng local
     public ResponseEntity<ApiResponse<OrderResponse>> confirmCheckIn(@PathVariable Long id) {
         try {
-            // Gọi hàm confirmCheckIn xử lý chuyển trạng thái đồng bộ Order + Ticket sang USED
+            // Chuyển trạng thái Order + Tickets sang trạng thái USED
             OrderResponse updatedOrder = orderService.confirmCheckIn(id);
             
             return ResponseEntity.ok(ApiResponse.<OrderResponse>builder()
