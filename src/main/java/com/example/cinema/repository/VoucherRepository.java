@@ -40,5 +40,13 @@ public interface VoucherRepository extends JpaRepository<Voucher, Long> {
            "AND v.usedCount < v.usageLimit")
     List<Voucher> findAvailableVouchers(@Param("now") LocalDateTime now);
 
-
+@Query("""
+    SELECT v
+    FROM Voucher v
+    WHERE v.voucherType = 'REDEEM'
+    AND (v.startDate IS NULL OR v.startDate <= :now)
+    AND (v.endDate IS NULL OR v.endDate >= :now)
+    AND v.usedCount < v.usageLimit
+""")
+List<Voucher> findRedeemableVouchers(LocalDateTime now);
 }

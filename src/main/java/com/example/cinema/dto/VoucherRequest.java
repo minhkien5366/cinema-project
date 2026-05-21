@@ -40,4 +40,6 @@ public class VoucherRequest {
     private LocalDateTime endDate;
 
     private Long promotionId;
+    private Integer costPoints;
+    private String voucherType;
 }

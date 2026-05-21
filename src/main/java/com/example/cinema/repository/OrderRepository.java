@@ -21,9 +21,12 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findByCinemaItem_Id(Long cinemaItemId, Sort sort);
 
     // --- THÊM MỚI: Truy vấn ID Suất chiếu từ một Đơn hàng (Dùng để đồng bộ Ticket) ---
-    @Query("SELECT DISTINCT t.showtime.id FROM Ticket t " +
-           "JOIN OrderDetail od ON t.seat.id = od.itemId " +
-           "WHERE od.order.id = :orderId AND od.itemType = 'TICKET'")
+    @Query("SELECT DISTINCT t.showtime.id FROM Order o " +
+           "JOIN o.orderDetails od " +
+           "JOIN Ticket t ON t.seat.id = od.itemId AND t.user.userId = o.user.userId " +
+           "WHERE o.id = :orderId " +
+           "AND od.itemType = 'TICKET' " +
+           "AND t.status != 'CANCELLED'")
     Long findShowtimeIdByOrderId(@Param("orderId") Long orderId);
 
     @Query("SELECT o FROM Order o WHERE o.status = 'PAID'")

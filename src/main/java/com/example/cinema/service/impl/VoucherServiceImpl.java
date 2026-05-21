@@ -1,5 +1,6 @@
 package com.example.cinema.service.impl;
 
+import com.example.cinema.dto.PointsRewardRequest;
 import com.example.cinema.dto.VoucherRequest;
 import com.example.cinema.entity.*;
 import com.example.cinema.exception.ResourceNotFoundException;
@@ -20,44 +21,92 @@ public class VoucherServiceImpl implements VoucherService {
     private final VoucherRepository voucherRepository;
     private final UserRepository userRepository;
     private final PromotionRepository promotionRepository;
-
+    private final PointHistoryRepository pointHistoryRepository;
     @Override
     public List<Voucher> getAllVouchers() {
         return voucherRepository.findAll();
     }
 
     @Override
+@Transactional
+public Voucher createVoucher(VoucherRequest request) {
+    validateSuperAdmin(); 
+
+    if (voucherRepository.existsByCode(request.getCode().toUpperCase())) {
+        throw new RuntimeException("Mã đã tồn tại!");
+    }
+
+    Voucher voucher = Voucher.builder()
+            .code(request.getCode().toUpperCase())
+            .title(request.getTitle())
+            .description(request.getDescription())
+            .discountValue(request.getDiscountValue())
+            .minOrderAmount(request.getMinOrderAmount())
+            .usageLimit(request.getUsageLimit())
+            .usedCount(0)
+            .startDate(request.getStartDate())
+            .endDate(request.getEndDate())
+            .costPoints(request.getCostPoints())
+            .voucherType(
+                    request.getPromotionId() != null
+                            ? "EVENT"
+                            : "REDEEM"
+            )
+            .build();
+
+    // Nếu có promotionId thì là mã sự kiện, không có thì mặc định là mã đổi điểm
+    if (request.getPromotionId() != null) {
+        Promotion promotion = promotionRepository.findById(request.getPromotionId())
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sự kiện"));
+        voucher.setPromotion(promotion);
+    }
+
+    return voucherRepository.save(voucher);
+}
+
+    @Override
     @Transactional
-    public Voucher createVoucher(VoucherRequest request) {
+    public Voucher updateVoucher(Long id, VoucherRequest request) {
         validateSuperAdmin(); 
 
-        if (voucherRepository.existsByCode(request.getCode().toUpperCase())) {
-            throw new RuntimeException("Mã giảm giá '" + request.getCode().toUpperCase() + "' đã tồn tại!");
+        Voucher voucher = voucherRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy voucher với ID: " + id));
+
+        String newCode = request.getCode().toUpperCase();
+        if (!voucher.getCode().equals(newCode)) {
+            if (voucherRepository.existsByCode(newCode)) {
+                throw new RuntimeException("Mã giảm giá '" + newCode + "' đã tồn tại trên hệ thống!");
+            }
         }
 
-        Voucher voucher = Voucher.builder()
-                .code(request.getCode().toUpperCase())
-                .title(request.getTitle())
-                .description(request.getDescription())
-                .discountValue(request.getDiscountValue())
-                .minOrderAmount(request.getMinOrderAmount())
-                .usageLimit(request.getUsageLimit())
-                .usedCount(0)
-                .startDate(request.getStartDate())
-                .endDate(request.getEndDate())
-                .build();
+        voucher.setCode(newCode);
+        voucher.setTitle(request.getTitle());
+        voucher.setDescription(request.getDescription());
+        voucher.setDiscountValue(request.getDiscountValue());
+        voucher.setMinOrderAmount(request.getMinOrderAmount());
+        voucher.setUsageLimit(request.getUsageLimit());
+        voucher.setStartDate(request.getStartDate());
+        voucher.setEndDate(request.getEndDate());
+        voucher.setCostPoints(request.getCostPoints());
 
-        // Gắn vào Sự kiện (Promotion)
+        voucher.setVoucherType(
+                request.getPromotionId() != null
+                        ? "EVENT"
+                        : "REDEEM"
+        );
         if (request.getPromotionId() != null) {
             Promotion promotion = promotionRepository.findById(request.getPromotionId())
                     .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sự kiện với ID: " + request.getPromotionId()));
             voucher.setPromotion(promotion);
+        } else {
+            voucher.setPromotion(null);
         }
 
         return voucherRepository.save(voucher);
     }
 
-    @Override
+
+@Override
 @Transactional
 public Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double currentTotal) {
 
@@ -129,40 +178,6 @@ public Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double curr
         userRepository.save(user);
     }
 
-    @Override
-    @Transactional
-    public Voucher updateVoucher(Long id, VoucherRequest request) {
-        validateSuperAdmin(); 
-
-        Voucher voucher = voucherRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy voucher với ID: " + id));
-
-        String newCode = request.getCode().toUpperCase();
-        if (!voucher.getCode().equals(newCode)) {
-            if (voucherRepository.existsByCode(newCode)) {
-                throw new RuntimeException("Mã giảm giá '" + newCode + "' đã tồn tại trên hệ thống!");
-            }
-        }
-
-        voucher.setCode(newCode);
-        voucher.setTitle(request.getTitle());
-        voucher.setDescription(request.getDescription());
-        voucher.setDiscountValue(request.getDiscountValue());
-        voucher.setMinOrderAmount(request.getMinOrderAmount());
-        voucher.setUsageLimit(request.getUsageLimit());
-        voucher.setStartDate(request.getStartDate());
-        voucher.setEndDate(request.getEndDate());
-
-        if (request.getPromotionId() != null) {
-            Promotion promotion = promotionRepository.findById(request.getPromotionId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sự kiện với ID: " + request.getPromotionId()));
-            voucher.setPromotion(promotion);
-        } else {
-            voucher.setPromotion(null);
-        }
-
-        return voucherRepository.save(voucher);
-    }
 
     @Override
     public List<Voucher> getVouchersByUser(Long userId) {
@@ -173,9 +188,12 @@ public Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double curr
 
     @Override
     public List<Voucher> getAvailableVouchers(Long promotionId) {
-        // Sử dụng hàm Query custom đã fix trong Repository
-        return voucherRepository.findActiveVouchersByPromotionId(promotionId, LocalDateTime.now());
-    }
+        return voucherRepository.findActiveVouchersByPromotionId(
+        promotionId,
+        LocalDateTime.now()
+).stream()
+ .filter(v -> "EVENT".equalsIgnoreCase(v.getVoucherType()))
+ .toList();}
 
     @Override
     @Transactional
@@ -199,47 +217,57 @@ public Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double curr
             throw new RuntimeException("Quyền truy cập bị từ chối: Yêu cầu quyền Super Admin!");
         }
     }
+@Transactional
+    public void redeemVoucher(Long voucherId) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        User user = userRepository.findByEmail(email).orElseThrow(() -> new ResourceNotFoundException("User không tồn tại"));
+        Voucher voucher = voucherRepository.findById(voucherId).orElseThrow(() -> new ResourceNotFoundException("Voucher không tồn tại"));
+        if (!"REDEEM".equalsIgnoreCase(voucher.getVoucherType())) {
+    throw new RuntimeException("Voucher này không hỗ trợ đổi điểm");
+}
+        if (voucher.getCostPoints() == null || voucher.getCostPoints() <= 0) throw new RuntimeException("Voucher không thể đổi bằng điểm");
+        if (user.getPoints() < voucher.getCostPoints()) throw new RuntimeException("Không đủ điểm");
+        if (user.getVouchers().stream().anyMatch(v -> v.getId().equals(voucherId))) throw new RuntimeException("Đã đổi voucher này rồi");
 
+        // ✅ Trừ điểm
+        user.setPoints(user.getPoints() - voucher.getCostPoints());
+        user.getVouchers().add(voucher);
+        userRepository.save(user);
+
+        // ✅ Ghi log lịch sử
+        PointHistory history = PointHistory.builder()
+                .user(user)
+                .amount(-voucher.getCostPoints())
+                .description("Đổi voucher: " + voucher.getTitle())
+                .type("REDEEMED")
+                .build();
+        pointHistoryRepository.save(history);
+    }
+
+    @Override
     @Transactional
-public void redeemVoucher(Long voucherId) {
+    public void rewardPointsToUser(PointsRewardRequest request) {
+        validateSuperAdmin();
+        if (request.getPoints() == null || request.getPoints() <= 0) throw new RuntimeException("Số điểm phải lớn hơn 0!");
 
-    // lấy user đang login
-    String email = SecurityContextHolder
-            .getContext()
-            .getAuthentication()
-            .getName();
+        User recipient = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy người dùng: " + request.getEmail()));
 
-    User user = userRepository.findByEmail(email)
-            .orElseThrow(() -> new ResourceNotFoundException("User không tồn tại"));
+        recipient.setPoints((recipient.getPoints() != null ? recipient.getPoints() : 0) + request.getPoints());
+        userRepository.save(recipient);
 
-    Voucher voucher = voucherRepository.findById(voucherId)
-            .orElseThrow(() -> new ResourceNotFoundException("Voucher không tồn tại"));
-
-    // ❌ voucher không cho đổi điểm
-    if (voucher.getCostPoints() == null || voucher.getCostPoints() <= 0) {
-        throw new RuntimeException("Voucher này không thể đổi bằng điểm");
+        // ✅ Ghi log lịch sử
+        PointHistory history = PointHistory.builder()
+                .user(recipient)
+                .amount(request.getPoints())
+                .description("Được Admin tặng điểm")
+                .type("EARNED")
+                .build();
+        pointHistoryRepository.save(history);
     }
 
-    // ❌ không đủ điểm
-    if (user.getPoints() < voucher.getCostPoints()) {
-        throw new RuntimeException("Không đủ điểm");
-    }
-
-    // ❌ đổi rồi
-    boolean existed = user.getVouchers()
-            .stream()
-            .anyMatch(v -> v.getId().equals(voucherId));
-
-    if (existed) {
-        throw new RuntimeException("Bạn đã đổi voucher này rồi");
-    }
-
-    // ✅ trừ điểm
-    user.setPoints(user.getPoints() - voucher.getCostPoints());
-
-    // ✅ thêm voucher vào user
-    user.getVouchers().add(voucher);
-
-    userRepository.save(user);
+    @Override
+public List<Voucher> getRedeemableVouchers() {
+    return voucherRepository.findRedeemableVouchers(LocalDateTime.now());
 }
 }

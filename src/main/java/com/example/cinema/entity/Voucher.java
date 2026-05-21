@@ -40,4 +40,5 @@ public class Voucher {
     @JoinColumn(name = "promotion_id")
     private Promotion promotion;
     private Integer costPoints;
+    private String voucherType;
 }

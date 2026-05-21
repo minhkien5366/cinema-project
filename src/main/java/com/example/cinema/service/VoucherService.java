@@ -1,5 +1,6 @@
 package com.example.cinema.service;
 
+import com.example.cinema.dto.PointsRewardRequest;
 import com.example.cinema.dto.VoucherRequest;
 import com.example.cinema.entity.Voucher;
 import java.util.List;
@@ -21,4 +22,6 @@ public interface VoucherService {
 
     Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double currentTotal);
     void redeemVoucher(Long voucherId);
+    void rewardPointsToUser(PointsRewardRequest request);
+    List<Voucher> getRedeemableVouchers();
 }
