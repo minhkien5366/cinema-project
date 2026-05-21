@@ -48,6 +48,15 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     List<Ticket> findBySeatIdAndShowtimeId(Long seatId, Long showtimeId);
     
     boolean existsBySeatAndShowtimeAndStatusNotIgnoreCase(Seat seat, Showtime showtime, String status);
+    // 🎯 THÊM MỚI: Lấy danh sách Top phim bán chạy nhất dựa trên tổng số vé đã thanh toán
+    @Query("SELECT m.id AS movieId, m.title AS title, m.posterUrl AS posterUrl, COUNT(t.id) AS totalTickets " +
+           "FROM Ticket t " +
+           "JOIN t.showtime s " +
+           "JOIN s.movie m " +
+           "WHERE t.status IN ('PAID', 'USED') " +
+           "GROUP BY m.id, m.title, m.posterUrl " +
+           "ORDER BY totalTickets DESC")
+    List<com.example.cinema.dto.TopMovieTicketDTO> findTopMoviesByTicketSales(org.springframework.data.domain.Pageable pageable);
 
     @Query("SELECT t.seat FROM Ticket t WHERE t.showtime.id = :showtimeId AND t.status IN ('BOOKED', 'PAID')")
     List<Seat> findOccupiedSeatsByShowtimeId(@Param("showtimeId") Long showtimeId);

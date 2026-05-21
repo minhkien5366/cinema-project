@@ -98,6 +98,17 @@ public class MovieController {
                         .build()
         );
     }
+    // 🎯 THÊM MỚI: API Lấy Top 3 Phim bán nhiều vé nhất (Public)
+    @GetMapping("/top-tickets")
+    public ResponseEntity<ApiResponse<java.util.List<com.example.cinema.dto.TopMovieTicketDTO>>> getTop3Movies() {
+        return ResponseEntity.ok(
+                ApiResponse.<java.util.List<com.example.cinema.dto.TopMovieTicketDTO>>builder()
+                        .status(200)
+                        .message("Lấy top 3 phim bán chạy thành công")
+                        .data(movieService.getTop3MoviesByTickets())
+                        .build()
+        );
+    }
 
     @PostMapping("/import")
 public ResponseEntity<?> importMovies(

@@ -29,6 +29,9 @@ public class Review {
     @ManyToOne
     @JoinColumn(name = "movie_id")
     private Movie movie;
+    // Trong Review.java
+    @Column(columnDefinition = "TEXT")
+    private String imageUrl; // Thêm dòng này
 
     @CreationTimestamp
     private LocalDateTime createdAt;

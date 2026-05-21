@@ -34,6 +34,10 @@ public class Movie {
     private String posterUrl;
     private String trailerUrl;
     private LocalDate releaseDate;
+    
+    // 🎯 THÊM MỚI: Phân loại độ tuổi (P, K, T13, T16, T18, C)
+    @Column(length = 10)
+    private String ageRating;
 
     @CreationTimestamp
     private LocalDateTime createdAt;

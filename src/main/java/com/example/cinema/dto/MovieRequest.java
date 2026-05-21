@@ -15,4 +15,5 @@ public class MovieRequest {
     private String trailerUrl;
     private LocalDate releaseDate;
     private Integer genreId; 
+    private String ageRating;
 }
