@@ -42,4 +42,42 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
        "WHERE o.createdAt BETWEEN :start AND :end AND o.status = 'PAID' " +
        "GROUP BY o.cinemaItem.name ORDER BY SUM(o.totalAmount) DESC")
 List<Object[]> getCinemaRanking(LocalDateTime start, LocalDateTime end);
+List<Order> findByCreatedAtBetweenAndStatus(
+    LocalDateTime start,
+    LocalDateTime end,
+    String status
+);
+
+@Query("""
+SELECT COALESCE(SUM(o.totalAmount),0)
+FROM Order o
+WHERE o.status = 'PAID'
+AND o.createdAt >= :start
+""")
+Double getTodayRevenue(LocalDateTime start);
+@Query("""
+SELECT COUNT(o)
+FROM Order o
+WHERE o.status = 'PAID'
+AND o.createdAt >= :start
+""")
+Long countTodayTickets(LocalDateTime start);
+
+@Query("""
+SELECT DATE(o.createdAt), SUM(o.totalAmount)
+FROM Order o
+WHERE o.status = 'PAID'
+AND o.createdAt >= :start
+GROUP BY DATE(o.createdAt)
+ORDER BY DATE(o.createdAt)
+""")
+List<Object[]> revenue7Days(LocalDateTime start);
+
+@Query("SELECT SUM(o.totalAmount) FROM Order o WHERE o.createdAt BETWEEN :start AND :end AND o.status = 'PAID'")
+Double sumRevenue(LocalDateTime start, LocalDateTime end);
+Long countByCreatedAtBetweenAndStatus(
+    LocalDateTime start,
+    LocalDateTime end,
+    String status
+);
 }

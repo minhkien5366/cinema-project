@@ -1,5 +1,6 @@
 package com.example.cinema.controller;
 
+import com.example.cinema.service.FinanceService;
 import com.example.cinema.service.ReportService;
 import com.example.cinema.service.impl.ReviewServiceImpl;
 
@@ -24,6 +25,9 @@ public class ReportController {
     private ReportService reportService;
     @Autowired
     private ReviewServiceImpl reviewService;
+    @Autowired
+    private FinanceService financeService;
+
 
     @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
 @GetMapping("/download")
@@ -55,4 +59,26 @@ public ResponseEntity<?> getRanking(
     public ResponseEntity<?> getMovieStats() {
         return ResponseEntity.ok(reportService.getMovieStatistics());
     }
+
+
+@PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/dashboard")
+    public ResponseEntity<?> dashboard() {
+        return ResponseEntity.ok(
+                reportService.getAdminDashboard(null)
+        );
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/revenue-7days")
+    public ResponseEntity<?> chart() {
+        return ResponseEntity.ok(
+                reportService.getAdminRevenue7Days()
+        );
+    }
+@PreAuthorize("hasRole('SUPER_ADMIN')")
+@GetMapping("/finance")
+public ResponseEntity<?> getFinanceReport(@RequestParam String month) {
+    return ResponseEntity.ok(financeService.getMonthlyFinance(month));
+}
 }

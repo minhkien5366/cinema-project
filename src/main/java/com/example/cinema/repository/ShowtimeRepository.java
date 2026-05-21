@@ -38,4 +38,20 @@ boolean existsByRoomIdAndEndTimeAfter(
 );
 boolean existsByRoomId(Long roomId);
 
+@Query("""
+SELECT COUNT(s)
+FROM Showtime s
+WHERE DATE(s.startTime) = CURRENT_DATE
+""")
+Long countTodayShowtimes();
+@Query("""
+SELECT DATE(o.createdAt), SUM(o.totalAmount)
+FROM Order o
+WHERE o.status = 'PAID'
+AND o.createdAt >= :start
+GROUP BY DATE(o.createdAt)
+ORDER BY DATE(o.createdAt)
+""")
+List<Object[]> revenue7Days(LocalDateTime start);
+
 }
