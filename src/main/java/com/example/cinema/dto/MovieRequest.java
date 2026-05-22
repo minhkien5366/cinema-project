@@ -2,6 +2,7 @@ package com.example.cinema.dto;
 
 import lombok.Data;
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 public class MovieRequest {
@@ -14,6 +15,9 @@ public class MovieRequest {
     private String status;
     private String trailerUrl;
     private LocalDate releaseDate;
-    private Integer genreId; 
+    
+    // 🎯 THAY ĐỔI: Chuyển từ Integer genreId sang List<Integer> genreIds
+    private List<Integer> genreIds; 
+    
     private String ageRating;
 }

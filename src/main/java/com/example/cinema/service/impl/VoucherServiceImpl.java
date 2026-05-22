@@ -150,10 +150,10 @@ public Voucher validateAndGetVoucher(String code, Long cinemaItemId, Double curr
         throw new RuntimeException("Bạn chưa lưu mã này trong kho!");
     }
 
-    // ===== XOÁ KHỎI KHO USER =====
-    user.getVouchers().removeIf(uv -> uv.getId().equals(v.getId()));
+    // // ===== XOÁ KHỎI KHO USER =====
+    // user.getVouchers().removeIf(uv -> uv.getId().equals(v.getId()));
 
-    userRepository.save(user);
+    // userRepository.save(user);
 
     return v;
 }

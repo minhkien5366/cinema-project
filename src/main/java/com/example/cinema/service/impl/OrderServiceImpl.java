@@ -276,8 +276,11 @@ public OrderResponse updateOrderStatus(Long orderId, String newStatus) {
     order.setStatus(status);
 
     // 1. Logic cập nhật Vé
-    Long showtimeId = orderRepository.findShowtimeIdByOrderId(order.getId());
-    if (order.getOrderDetails() != null && showtimeId != null) {
+List<Long> showtimeIds =
+        orderRepository.findShowtimeIdByOrderId(order.getId());
+
+Long showtimeId =
+        showtimeIds.isEmpty() ? null : showtimeIds.get(0);    if (order.getOrderDetails() != null && showtimeId != null) {
         for (OrderDetail d : order.getOrderDetails()) {
             if ("TICKET".equals(d.getItemType())) {
                 List<Ticket> tickets = ticketRepository.findBySeatIdAndShowtimeId(d.getItemId(), showtimeId);
@@ -307,6 +310,7 @@ if ("PAID".equals(status)) {
     user.setPoints(user.getPoints() + earnedPoints);
 
     userRepository.save(user);
+    
 }
     
     // 3. Cập nhật bảng Payment
@@ -402,36 +406,52 @@ if ("PAID".equals(status)) {
         return mapToResponse(order);
     }
 
-    @Override
-    @Transactional
-    public OrderResponse confirmCheckIn(Long orderId) {
-        Order order = orderRepository.findById(orderId).orElseThrow(() -> new ResourceNotFoundException("Đơn hàng không tồn tại"));
-        
-        String foundBookingCode = "N/A";
-        if (order.getOrderDetails() != null) {
-            for (OrderDetail d : order.getOrderDetails()) {
-                if ("TICKET".equals(d.getItemType())) {
-                    List<Ticket> tickets = ticketRepository.findBySeatIdAndShowtimeId(d.getItemId(), orderRepository.findShowtimeIdByOrderId(order.getId()));
-                    
-                    // 🎯 TỐI ƯU CHECKIN: Lấy mã bookingCode của vé mới nhất.
-                   // Thay logic trong vòng lặp của hàm confirmCheckIn bằng đoạn này:
-                    Optional<Ticket> correctTicket = ticketRepository.findBySeatIdAndShowtimeId(d.getItemId(), orderRepository.findShowtimeIdByOrderId(order.getId()))
-                            .stream()
-                            .filter(t -> t.getUser() != null && t.getUser().getUserId().equals(order.getUser().getUserId()))
-                            .max(Comparator.comparing(Ticket::getId)); // Chỉ lấy vé mới nhất
+@Override
+@Transactional
+public OrderResponse confirmCheckIn(Long orderId) {
 
-                    if (correctTicket.isPresent()) {
-                        foundBookingCode = correctTicket.get().getBookingCode();
-                        break;
-                    }
+    Order order = orderRepository.findById(orderId)
+            .orElseThrow(() -> new ResourceNotFoundException("Đơn hàng không tồn tại"));
+
+    List<Long> showtimeIds =
+            orderRepository.findShowtimeIdByOrderId(order.getId());
+
+    Long showtimeId =
+            showtimeIds.isEmpty() ? null : showtimeIds.get(0);
+
+    String foundBookingCode = "N/A";
+
+    if (order.getOrderDetails() != null && showtimeId != null) {
+
+        for (OrderDetail d : order.getOrderDetails()) {
+
+            if ("TICKET".equals(d.getItemType())) {
+
+                List<Ticket> tickets =
+                        ticketRepository.findBySeatIdAndShowtimeId(
+                                d.getItemId(),
+                                showtimeId
+                        );
+
+                Optional<Ticket> correctTicket = tickets.stream()
+                        .filter(t -> t.getUser() != null
+                                && t.getUser().getUserId()
+                                .equals(order.getUser().getUserId()))
+                        .max(Comparator.comparing(Ticket::getId));
+
+                if (correctTicket.isPresent()) {
+                    foundBookingCode =
+                            correctTicket.get().getBookingCode();
+                    break;
                 }
             }
         }
-        
-        scanOrderTicket(foundBookingCode);
-        return updateOrderStatus(orderId, "USED");
     }
 
+    scanOrderTicket(foundBookingCode);
+
+    return updateOrderStatus(orderId, "USED");
+}
     @Override 
     public List<OrderResponse> getAllOrders() { 
         User user = getCurrentUser();
@@ -478,7 +498,8 @@ if ("PAID".equals(status)) {
     }
 
     private OrderResponse mapToResponse(Order order) {
-        Long showtimeId = orderRepository.findShowtimeIdByOrderId(order.getId());
+        List<Long> showtimeIds = orderRepository.findShowtimeIdByOrderId(order.getId());
+        Long showtimeId = showtimeIds.isEmpty() ? null : showtimeIds.get(0);
         String realBookingCode = null; 
 
         if (order.getOrderDetails() != null) {

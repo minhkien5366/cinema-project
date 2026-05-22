@@ -21,13 +21,13 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findByCinemaItem_Id(Long cinemaItemId, Sort sort);
 
     // --- THÊM MỚI: Truy vấn ID Suất chiếu từ một Đơn hàng (Dùng để đồng bộ Ticket) ---
-    @Query("SELECT DISTINCT t.showtime.id FROM Order o " +
-           "JOIN o.orderDetails od " +
-           "JOIN Ticket t ON t.seat.id = od.itemId AND t.user.userId = o.user.userId " +
-           "WHERE o.id = :orderId " +
-           "AND od.itemType = 'TICKET' " +
-           "AND t.status != 'CANCELLED'")
-    Long findShowtimeIdByOrderId(@Param("orderId") Long orderId);
+@Query("SELECT DISTINCT t.showtime.id FROM Order o " +
+       "JOIN o.orderDetails od " +
+       "JOIN Ticket t ON t.seat.id = od.itemId AND t.user.userId = o.user.userId " +
+       "WHERE o.id = :orderId " +
+       "AND od.itemType = 'TICKET' " +
+       "AND t.status != 'CANCELLED'")
+List<Long> findShowtimeIdByOrderId(@Param("orderId") Long orderId);
 
     @Query("SELECT o FROM Order o WHERE o.status = 'PAID'")
     Stream<Order> streamAllPaidOrders();
@@ -80,4 +80,5 @@ Long countByCreatedAtBetweenAndStatus(
     LocalDateTime end,
     String status
 );
+
 }
