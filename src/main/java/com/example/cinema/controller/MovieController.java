@@ -12,7 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-
+import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/movies")
 @RequiredArgsConstructor
@@ -38,18 +38,23 @@ public class MovieController {
         );
     }
 
-    // 2. Lấy chi tiết phim (Public)
-    @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<Movie>> getMovieDetail(@PathVariable Long id) {
-        Movie movie = movieService.getMovieDetail(id);
-        return ResponseEntity.ok(
-                ApiResponse.<Movie>builder()
-                        .status(200)
-                        .message("Lấy chi tiết phim thành công")
-                        .data(movie)
-                        .build()
-        );
-    }
+@PostMapping("/import")
+public ResponseEntity<?> importMovies(@RequestParam("file") MultipartFile file) {
+    Map<String, Object> report = movieService.importExcel(file);
+    return ResponseEntity.ok(report);
+}
+
+@GetMapping("/{id:\\d+}")
+public ResponseEntity<ApiResponse<Movie>> getMovieDetail(@PathVariable Long id) {
+    Movie movie = movieService.getMovieDetail(id);
+    return ResponseEntity.ok(
+            ApiResponse.<Movie>builder()
+                    .status(200)
+                    .message("Lấy chi tiết phim thành công")
+                    .data(movie)
+                    .build()
+    );
+}
 
     // 3. Thêm phim mới kèm Upload ảnh (Admin/Super Admin)
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -109,12 +114,4 @@ public class MovieController {
                         .build()
         );
     }
-
-    @PostMapping("/import")
-public ResponseEntity<?> importMovies(
-        @RequestParam("file") MultipartFile file
-) {
-    movieService.importExcel(file);
-    return ResponseEntity.ok("Import movie thành công");
-}
 }

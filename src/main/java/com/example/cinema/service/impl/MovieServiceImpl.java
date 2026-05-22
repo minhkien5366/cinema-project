@@ -12,9 +12,10 @@ import com.example.cinema.repository.ReviewRepository;
 import com.example.cinema.repository.TicketRepository;
 import com.example.cinema.service.CloudinaryService;
 import com.example.cinema.service.MovieService;
-
+import java.util.Map;
+import java.util.HashMap;
 import lombok.RequiredArgsConstructor;
-
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -146,86 +148,112 @@ public class MovieServiceImpl implements MovieService {
         return ticketRepository.findTopMoviesByTicketSales(top3);
     }
 
-    // =========================================================
-    // 🎯 EXCEL IMPORT (Hỗ trợ nhiều thể loại cách nhau bằng dấu phẩy)
+// =========================================================
+    // 🎯 EXCEL IMPORT (Hỗ trợ nhiều thể loại, xử lý cuốn chiếu độc lập)
     // =========================================================
     @Override
-    @Transactional
-    public void importExcel(MultipartFile file) {
+    public Map<String, Object> importExcel(MultipartFile file) {
+        Map<String, Object> resultReport = new HashMap<>();
+        List<String> importErrors = new ArrayList<>();
+        int successCount = 0;
+        int totalRows = 0;
+
         try (InputStream is = file.getInputStream();
              Workbook workbook = new XSSFWorkbook(is)) {
 
             Sheet sheet = workbook.getSheetAt(0);
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+            // Định dạng ngày MM/dd/yyyy hoặc yyyy-MM-dd tùy cấu hình file excel dữ liệu mẫu
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("[M/d/yyyy][yyyy-MM-dd]");
+            totalRows = sheet.getLastRowNum();
 
-            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+            for (int i = 1; i <= totalRows; i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
+                
+                // Bỏ qua nếu dòng trống (Kiểm tra tiêu đề phim rỗng)
+                String titleCheck = readString(row.getCell(0));
+                if (titleCheck == null || titleCheck.isBlank()) {
+                    continue; 
+                }
 
+                // Cô lập Transaction cho từng dòng bằng cách gọi qua một proxy hoặc xử lý an toàn
                 try {
-                    String title = readString(row.getCell(0));
-                    String description = readString(row.getCell(1));
-                    Integer duration = readInt(row.getCell(2));
-                    String director = readString(row.getCell(3));
-                    String cast = readString(row.getCell(4));
-                    String country = readString(row.getCell(5));
-                    String status = readString(row.getCell(6));
-                    LocalDate releaseDate = readDate(row.getCell(7), formatter);
-                    
-                    // Chuỗi thể loại trong Excel (Ví dụ: "Hành động, Phiêu lưu, Kinh dị")
-                    String genreNamesData = readString(row.getCell(8)); 
-                    
-                    String posterUrl = readString(row.getCell(9));
-                    String trailerUrl = readString(row.getCell(10));
-                    String ageRating = readString(row.getCell(11));
-
-                    if (title == null || duration == null || genreNamesData == null) {
-                        throw new RuntimeException("Thiếu dữ liệu bắt buộc");
-                    }
-
-                    if (movieRepository.existsByTitleIgnoreCase(title)) {
-                        throw new RuntimeException("Phim đã tồn tại");
-                    }
-
-                    // Tách chuỗi và truy vấn từng thể loại từ database
-                    Set<Genre> genres = new HashSet<>();
-                    String[] genreSplit = genreNamesData.split(",");
-                    for (String gName : genreSplit) {
-                        String cleanName = gName.trim();
-                        if (!cleanName.isEmpty()) {
-                            Genre genre = genreRepository.findByNameIgnoreCase(cleanName)
-                                    .orElseThrow(() -> new RuntimeException("Không tìm thấy thể loại: " + cleanName));
-                            genres.add(genre);
-                        }
-                    }
-
-                    Movie movie = new Movie();
-                    movie.setTitle(title);
-                    movie.setDescription(description);
-                    movie.setDuration(duration);
-                    movie.setDirector(director);
-                    movie.setCast(cast);
-                    movie.setCountry(country);
-                    movie.setStatus(status);
-                    movie.setReleaseDate(releaseDate);
-                    movie.setPosterUrl(posterUrl);
-                    movie.setTrailerUrl(trailerUrl);
-                    movie.setAgeRating(ageRating != null && !ageRating.isEmpty() ? ageRating : "P");
-                    
-                    // Gán tập hợp các thể loại cho đối tượng Movie
-                    movie.setGenres(genres);
-
-                    movieRepository.save(movie);
-
+                    saveIndividualMovie(row, formatter);
+                    successCount++;
                 } catch (Exception rowError) {
-                    throw new RuntimeException("Lỗi dòng " + (i + 1) + ": " + rowError.getMessage());
+                    // Gom lỗi và đính kèm vị trí dòng thực tế trong Excel (i + 1)
+                    importErrors.add("Dòng " + (i + 1) + ": " + rowError.getMessage());
                 }
             }
+
         } catch (Exception e) {
-            throw new RuntimeException("Import movie thất bại: " + e.getMessage());
+            throw new RuntimeException("Không thể đọc tệp Excel: " + e.getMessage());
         }
+
+        resultReport.put("total", totalRows);
+        resultReport.put("successCount", successCount);
+        resultReport.put("errors", importErrors);
+        return resultReport;
     }
 
+    // Độc lập Transaction: Lỗi dòng này không làm mất dữ liệu dòng khác
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void saveIndividualMovie(Row row, DateTimeFormatter formatter) {
+        String title = readString(row.getCell(0));
+        String description = readString(row.getCell(1));
+        Integer duration = readInt(row.getCell(2));
+        String director = readString(row.getCell(3));
+        String cast = readString(row.getCell(4));
+        String country = readString(row.getCell(5));
+        String status = readString(row.getCell(6));
+        LocalDate releaseDate = readDate(row.getCell(7), formatter);
+        String genreNamesData = readString(row.getCell(8));
+        String posterUrl = readString(row.getCell(9));
+        String trailerUrl = readString(row.getCell(10));
+        String ageRating = readString(row.getCell(11));
+
+        if (title == null || title.isBlank() || duration == null || genreNamesData == null || genreNamesData.isBlank()) {
+            throw new RuntimeException("Thiếu dữ liệu bắt buộc (Tiêu đề, Thời lượng, Thể loại)");
+        }
+
+        if (movieRepository.existsByTitleIgnoreCase(title)) {
+            throw new RuntimeException("Phim '" + title + "' đã tồn tại trong hệ thống");
+        }
+
+        Set<Genre> genres = new HashSet<>();
+        // Tách chuỗi theo dấu phẩy hoặc dấu chấm phẩy
+        String[] genreSplit = genreNamesData.split("[,;]");
+        for (String gName : genreSplit) {
+            String cleanName = gName.trim();
+            if (cleanName.isEmpty()) continue;
+
+            Genre genre = genreRepository.findByNameIgnoreCase(cleanName)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy danh mục thể loại '" + cleanName + "'"));
+            genres.add(genre);
+        }
+
+        if (genres.isEmpty()) {
+            throw new RuntimeException("Không có thể loại nào hợp lệ");
+        }
+
+        Movie movie = new Movie();
+        movie.setTitle(title);
+        movie.setDescription(description);
+        movie.setDuration(duration);
+        movie.setDirector(director);
+        movie.setCast(cast);
+        movie.setCountry(country);
+        movie.setStatus(status != null && !status.isBlank() ? status : "NOW_SHOWING");
+        movie.setReleaseDate(releaseDate);
+        movie.setPosterUrl(posterUrl);
+        movie.setTrailerUrl(trailerUrl);
+        movie.setAgeRating(ageRating != null && !ageRating.isBlank() ? ageRating : "P");
+        
+        // Gán trực tiếp tập danh sách thể loại vào đối tượng Movie (Owner Side)
+        movie.setGenres(genres);
+
+        movieRepository.save(movie);
+    }
     // =========================================================
     // 🎯 CONVERT ENTITY -> DTO
     // =========================================================

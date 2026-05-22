@@ -30,7 +30,7 @@ public class Movie {
     private String cast;
 
     // 🎯 THAY ĐỔI: Chuyển từ @ManyToOne sang @ManyToMany
-    @ManyToMany(fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
+@ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "movie_genre", // Tên bảng trung gian
         joinColumns = @JoinColumn(name = "movie_id"), // Khóa ngoại trỏ đến bảng movies
