@@ -117,7 +117,7 @@ public void importExcel(MultipartFile file) {
                         .orElseThrow(() -> new RuntimeException("Không tìm thấy phim: " + movieName));
                 
                 // 2. Tìm phòng thuộc chi nhánh quản lý của Admin
-                Room room = roomRepository.findByNameAndCinemaItemId(roomName, managedCinemaId)
+                Room room = roomRepository.findByNameAndCinemaItem_Id(roomName, managedCinemaId)
                         .orElseThrow(() -> new RuntimeException("Không tìm thấy phòng '" + roomName + "' thuộc chi nhánh của bạn"));
                 
                 CinemaItem cinemaItem = room.getCinemaItem();
