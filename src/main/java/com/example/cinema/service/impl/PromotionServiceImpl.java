@@ -23,7 +23,7 @@ public class PromotionServiceImpl implements PromotionService {
     private final CinemaItemRepository cinemaItemRepository;
     private final MovieRepository movieRepository;
     private final UserRepository userRepository;
-    private final CloudinaryService cloudinaryService; // ✅ ADD
+    private final CloudinaryService cloudinaryService;
 
     @Override
     public List<Promotion> getPromotionsForClient(Long cinemaItemId) {
@@ -49,6 +49,10 @@ public class PromotionServiceImpl implements PromotionService {
     @Transactional
     public Promotion createPromotion(PromotionRequest request, MultipartFile file) {
 
+        if (promotionRepository.findByTitle(request.getTitle()).isPresent()) {
+            throw new RuntimeException("Tên khuyến mãi đã tồn tại!");
+        }
+
         Promotion promotion = new Promotion();
         mapRequestToEntity(request, promotion);
 
@@ -57,15 +61,14 @@ public class PromotionServiceImpl implements PromotionService {
                 String url = cloudinaryService.uploadImage(file, "promotions");
                 promotion.setThumbnail(url);
             } catch (IOException e) {
-                throw new RuntimeException("Upload ảnh Cloudinary lỗi: " + e.getMessage());
+                throw new RuntimeException("Upload ảnh thất bại: " + e.getMessage());
             }
         }
 
         return promotionRepository.save(promotion);
-    }
-
+    }   
     // ================= UPDATE =================
-
+    
     @Override
     @Transactional
     public Promotion updatePromotion(Long id, PromotionRequest request, MultipartFile file) {
@@ -73,15 +76,20 @@ public class PromotionServiceImpl implements PromotionService {
         Promotion promotion = promotionRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sự kiện"));
 
+        if (!promotion.getTitle().equalsIgnoreCase(request.getTitle())) {
+
+            promotionRepository.findByTitle(request.getTitle())
+                    .ifPresent(existing -> {
+                        throw new RuntimeException("Tên khuyến mãi đã tồn tại!");
+                    });
+        }
+
         mapRequestToEntity(request, promotion);
 
         if (file != null && !file.isEmpty()) {
             try {
-
-                // ✅ delete old image cloud
                 if (promotion.getThumbnail() != null &&
                         promotion.getThumbnail().contains("cloudinary")) {
-
                     cloudinaryService.deleteImage(promotion.getThumbnail());
                 }
 
@@ -89,13 +97,13 @@ public class PromotionServiceImpl implements PromotionService {
                 promotion.setThumbnail(url);
 
             } catch (IOException e) {
-                throw new RuntimeException("Lỗi xử lý ảnh Cloudinary: " + e.getMessage());
+                throw new RuntimeException("Lỗi xử lý ảnh: " + e.getMessage());
             }
         }
 
         return promotionRepository.save(promotion);
     }
-
+    
     // ================= DELETE =================
 
     @Override

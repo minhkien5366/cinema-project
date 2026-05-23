@@ -30,7 +30,7 @@ public class BannerServiceImpl implements BannerService {
 
     @Override
     public List<Banner> getActiveBanners() {
-        return bannerRepository.findByStatusOrderBySortOrderAsc("ACTIVE");
+        return bannerRepository.findByStatus("ACTIVE");
     }
 
     @Override
@@ -45,6 +45,10 @@ public class BannerServiceImpl implements BannerService {
     @Override
     @Transactional
     public Banner createBanner(BannerRequest request, MultipartFile file) {
+        bannerRepository.findByTitle(request.getTitle())
+                .ifPresent(b -> {
+                    throw new RuntimeException("Tiêu đề banner đã tồn tại!");
+                });
 
         Banner banner = new Banner();
         mapRequestToEntity(request, banner);
@@ -59,8 +63,7 @@ public class BannerServiceImpl implements BannerService {
         }
 
         return bannerRepository.save(banner);
-    }
-
+    }  
     // ================= UPDATE =================
 
     @Override
@@ -69,14 +72,21 @@ public class BannerServiceImpl implements BannerService {
 
         Banner banner = bannerRepository.findById(id)
                 .orElseThrow(() ->
-                        new ResourceNotFoundException("Không tìm thấy Banner"));
+                        new ResourceNotFoundException("Không tìm thấy Banner ID: " + id));
+
+        if (!banner.getTitle().equalsIgnoreCase(request.getTitle())) {
+
+            bannerRepository.findByTitle(request.getTitle())
+                    .ifPresent(existing -> {
+                        throw new RuntimeException("Tiêu đề banner đã tồn tại!");
+                    });
+        }
 
         mapRequestToEntity(request, banner);
 
         if (file != null && !file.isEmpty()) {
             try {
 
-                // Xóa ảnh cũ trên Cloudinary
                 if (banner.getImageUrl() != null &&
                         banner.getImageUrl().contains("cloudinary")) {
 
@@ -93,7 +103,6 @@ public class BannerServiceImpl implements BannerService {
 
         return bannerRepository.save(banner);
     }
-
     // ================= DELETE =================
 
     @Override
@@ -101,8 +110,8 @@ public class BannerServiceImpl implements BannerService {
     public void deleteBanner(Long id) {
 
         Banner banner = bannerRepository.findById(id)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException("Không tìm thấy Banner"));
+        .orElseThrow(() ->
+                new ResourceNotFoundException("Không tìm thấy Banner ID: " + id));
 
         try {
             if (banner.getImageUrl() != null &&
@@ -122,8 +131,6 @@ public class BannerServiceImpl implements BannerService {
     private void mapRequestToEntity(BannerRequest request, Banner banner) {
         banner.setTitle(request.getTitle());
         banner.setLinkUrl(request.getLinkUrl());
-        banner.setPosition(request.getPosition());
         banner.setStatus(request.getStatus());
-        banner.setSortOrder(request.getSortOrder());
     }
 }

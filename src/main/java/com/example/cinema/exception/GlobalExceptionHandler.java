@@ -2,7 +2,13 @@ package com.example.cinema.exception;
 
 import com.example.cinema.dto.ApiResponse;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -17,11 +23,30 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(RuntimeException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST) // Trả về 400 thay vì 403
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ApiResponse<String> handleRuntimeException(RuntimeException ex) {
         return ApiResponse.<String>builder()
                 .status(HttpStatus.BAD_REQUEST.value())
-                .message(ex.getMessage()) // Nó sẽ hiện: "Mã giảm giá đã hết hạn!"
+                .message(ex.getMessage())
+                .build();
+    }
+
+    // 🔥 VALIDATION ERROR HANDLER (CÁI BẠN ĐANG THIẾU)
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Map<String, String>> handleValidation(MethodArgumentNotValidException ex) {
+
+        Map<String, String> errors = new HashMap<>();
+
+        ex.getBindingResult().getFieldErrors()
+                .forEach(error ->
+                        errors.put(error.getField(), error.getDefaultMessage())
+                );
+
+        return ApiResponse.<Map<String, String>>builder()
+                .status(HttpStatus.BAD_REQUEST.value())
+                .message("Dữ liệu không hợp lệ")
+                .data(errors)
                 .build();
     }
 }
