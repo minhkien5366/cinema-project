@@ -12,11 +12,13 @@ import java.util.List;
 
 public interface MovieService {
     Page<MovieDTO> getMovies(String search, String status, int page, int size);
-    Movie getMovieDetail(Long id);
+    
+    // 🎯 FIX LỖI Ở ĐÂY: Trả về DTO để Frontend lấy được reviewCount và genreNames
+    MovieDTO getMovieDetail(Long id);
+    
     Movie createMovie(MovieRequest request, MultipartFile file);
     Movie updateMovie(Long id, MovieRequest request, MultipartFile file);
     void deleteMovie(Long id);
     Map<String, Object> importExcel(MultipartFile file);    
-    // 🎯 THÊM MỚI: Lấy danh sách Top 3 phim bán chạy nhất
     List<TopMovieTicketDTO> getTop3MoviesByTickets();
 }

@@ -13,6 +13,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import java.util.Map;
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/v1/movies")
 @RequiredArgsConstructor
@@ -38,23 +40,24 @@ public class MovieController {
         );
     }
 
-@PostMapping("/import")
-public ResponseEntity<?> importMovies(@RequestParam("file") MultipartFile file) {
-    Map<String, Object> report = movieService.importExcel(file);
-    return ResponseEntity.ok(report);
-}
+    @PostMapping("/import")
+    public ResponseEntity<?> importMovies(@RequestParam("file") MultipartFile file) {
+        Map<String, Object> report = movieService.importExcel(file);
+        return ResponseEntity.ok(report);
+    }
 
-@GetMapping("/{id:\\d+}")
-public ResponseEntity<ApiResponse<Movie>> getMovieDetail(@PathVariable Long id) {
-    Movie movie = movieService.getMovieDetail(id);
-    return ResponseEntity.ok(
-            ApiResponse.<Movie>builder()
-                    .status(200)
-                    .message("Lấy chi tiết phim thành công")
-                    .data(movie)
-                    .build()
-    );
-}
+    // 🎯 FIX LỖI Ở ĐÂY: Đổi kiểu trả về thành MovieDTO
+    @GetMapping("/{id:\\d+}")
+    public ResponseEntity<ApiResponse<MovieDTO>> getMovieDetail(@PathVariable Long id) {
+        MovieDTO movie = movieService.getMovieDetail(id);
+        return ResponseEntity.ok(
+                ApiResponse.<MovieDTO>builder()
+                        .status(200)
+                        .message("Lấy chi tiết phim thành công")
+                        .data(movie)
+                        .build()
+        );
+    }
 
     // 3. Thêm phim mới kèm Upload ảnh (Admin/Super Admin)
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -103,11 +106,12 @@ public ResponseEntity<ApiResponse<Movie>> getMovieDetail(@PathVariable Long id) 
                         .build()
         );
     }
-    // 🎯 THÊM MỚI: API Lấy Top 3 Phim bán nhiều vé nhất (Public)
+
+    // 6. Lấy Top 3 Phim bán nhiều vé nhất (Public)
     @GetMapping("/top-tickets")
-    public ResponseEntity<ApiResponse<java.util.List<com.example.cinema.dto.TopMovieTicketDTO>>> getTop3Movies() {
+    public ResponseEntity<ApiResponse<List<com.example.cinema.dto.TopMovieTicketDTO>>> getTop3Movies() {
         return ResponseEntity.ok(
-                ApiResponse.<java.util.List<com.example.cinema.dto.TopMovieTicketDTO>>builder()
+                ApiResponse.<List<com.example.cinema.dto.TopMovieTicketDTO>>builder()
                         .status(200)
                         .message("Lấy top 3 phim bán chạy thành công")
                         .data(movieService.getTop3MoviesByTickets())

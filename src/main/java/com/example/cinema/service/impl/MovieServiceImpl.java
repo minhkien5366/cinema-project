@@ -64,16 +64,17 @@ public class MovieServiceImpl implements MovieService {
         return new PageImpl<>(dtos, pageable, moviePage.getTotalElements());
     }
 
+    // 🎯 Dùng convertToDTO để đính kèm toàn bộ dữ liệu Full Option
     @Override
-    public Movie getMovieDetail(Long id) {
-        return movieRepository.findById(id)
+    public MovieDTO getMovieDetail(Long id) {
+        Movie movie = movieRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy phim với ID: " + id));
+        return convertToDTO(movie);
     }
 
     @Override
     @Transactional
     public Movie createMovie(MovieRequest request, MultipartFile file) {
-        // 🎯 Lấy danh sách thể loại từ danh sách ID truyền lên
         Set<Genre> genres = new HashSet<>(genreRepository.findAllById(request.getGenreIds()));
         if (genres.isEmpty()) {
             throw new ResourceNotFoundException("Danh sách thể loại không hợp lệ hoặc trống!");
@@ -100,7 +101,6 @@ public class MovieServiceImpl implements MovieService {
         Movie movie = movieRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy phim để cập nhật"));
 
-        // 🎯 Lấy danh sách thể loại mới từ danh sách ID truyền lên
         Set<Genre> genres = new HashSet<>(genreRepository.findAllById(request.getGenreIds()));
         if (genres.isEmpty()) {
             throw new ResourceNotFoundException("Danh sách thể loại không hợp lệ hoặc trống!");
@@ -137,7 +137,6 @@ public class MovieServiceImpl implements MovieService {
             }
         }
 
-        // Xóa sạch các mối liên kết ở bảng trung gian trước khi xóa object Movie để tránh lỗi ràng buộc khóc ngoại
         movie.getGenres().clear();
         movieRepository.delete(movie);
     }
@@ -148,9 +147,6 @@ public class MovieServiceImpl implements MovieService {
         return ticketRepository.findTopMoviesByTicketSales(top3);
     }
 
-// =========================================================
-    // 🎯 EXCEL IMPORT (Hỗ trợ nhiều thể loại, xử lý cuốn chiếu độc lập)
-    // =========================================================
     @Override
     public Map<String, Object> importExcel(MultipartFile file) {
         Map<String, Object> resultReport = new HashMap<>();
@@ -162,7 +158,6 @@ public class MovieServiceImpl implements MovieService {
              Workbook workbook = new XSSFWorkbook(is)) {
 
             Sheet sheet = workbook.getSheetAt(0);
-            // Định dạng ngày MM/dd/yyyy hoặc yyyy-MM-dd tùy cấu hình file excel dữ liệu mẫu
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("[M/d/yyyy][yyyy-MM-dd]");
             totalRows = sheet.getLastRowNum();
 
@@ -170,18 +165,15 @@ public class MovieServiceImpl implements MovieService {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
                 
-                // Bỏ qua nếu dòng trống (Kiểm tra tiêu đề phim rỗng)
                 String titleCheck = readString(row.getCell(0));
                 if (titleCheck == null || titleCheck.isBlank()) {
                     continue; 
                 }
 
-                // Cô lập Transaction cho từng dòng bằng cách gọi qua một proxy hoặc xử lý an toàn
                 try {
                     saveIndividualMovie(row, formatter);
                     successCount++;
                 } catch (Exception rowError) {
-                    // Gom lỗi và đính kèm vị trí dòng thực tế trong Excel (i + 1)
                     importErrors.add("Dòng " + (i + 1) + ": " + rowError.getMessage());
                 }
             }
@@ -196,7 +188,6 @@ public class MovieServiceImpl implements MovieService {
         return resultReport;
     }
 
-    // Độc lập Transaction: Lỗi dòng này không làm mất dữ liệu dòng khác
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void saveIndividualMovie(Row row, DateTimeFormatter formatter) {
         String title = readString(row.getCell(0));
@@ -221,7 +212,6 @@ public class MovieServiceImpl implements MovieService {
         }
 
         Set<Genre> genres = new HashSet<>();
-        // Tách chuỗi theo dấu phẩy hoặc dấu chấm phẩy
         String[] genreSplit = genreNamesData.split("[,;]");
         for (String gName : genreSplit) {
             String cleanName = gName.trim();
@@ -243,34 +233,42 @@ public class MovieServiceImpl implements MovieService {
         movie.setDirector(director);
         movie.setCast(cast);
         movie.setCountry(country);
-        movie.setStatus(status != null && !status.isBlank() ? status : "NOW_SHOWING");
+        movie.setStatus(status != null && !status.isBlank() ? status : "SHOWING");
         movie.setReleaseDate(releaseDate);
         movie.setPosterUrl(posterUrl);
         movie.setTrailerUrl(trailerUrl);
         movie.setAgeRating(ageRating != null && !ageRating.isBlank() ? ageRating : "P");
         
-        // Gán trực tiếp tập danh sách thể loại vào đối tượng Movie (Owner Side)
         movie.setGenres(genres);
-
         movieRepository.save(movie);
     }
+
     // =========================================================
-    // 🎯 CONVERT ENTITY -> DTO
+    // 🎯 CONVERT ENTITY -> DTO (FULL OPTION)
     // =========================================================
     private MovieDTO convertToDTO(Movie movie) {
         MovieDTO dto = new MovieDTO();
+        
         dto.setId(movie.getId());
         dto.setTitle(movie.getTitle());
+        dto.setDescription(movie.getDescription());
+        dto.setDirector(movie.getDirector());
+        dto.setCast(movie.getCast());
+        dto.setCountry(movie.getCountry());
+        dto.setReleaseDate(movie.getReleaseDate());
+        dto.setTrailerUrl(movie.getTrailerUrl());
         dto.setPosterUrl(movie.getPosterUrl());
         dto.setDuration(movie.getDuration());
         dto.setStatus(movie.getStatus());
         dto.setRating(movie.getRating());
         dto.setAgeRating(movie.getAgeRating());
+        dto.setCreatedAt(movie.getCreatedAt());
+        dto.setUpdatedAt(movie.getUpdatedAt());
 
+        // CHỖ NÀY SẼ LẤY LƯỢT ĐÁNH GIÁ ĐỂ FRONTEND HIỂN THỊ
         Long reviewCount = reviewRepository.countReviewsByMovieId(movie.getId());
         dto.setReviewCount(reviewCount);
 
-        // Map Set<Genre> sang Set<String> tên thể loại để đưa vào DTO
         if (movie.getGenres() != null && !movie.getGenres().isEmpty()) {
             Set<String> genreNames = movie.getGenres().stream()
                     .map(Genre::getName)
@@ -281,9 +279,6 @@ public class MovieServiceImpl implements MovieService {
         return dto;
     }
 
-    // =========================================================
-    // 🎯 MAP REQUEST -> ENTITY
-    // =========================================================
     private void mapRequestToEntity(MovieRequest request, Movie movie, Set<Genre> genres) {
         movie.setTitle(request.getTitle());
         movie.setDescription(request.getDescription());
@@ -296,13 +291,9 @@ public class MovieServiceImpl implements MovieService {
         movie.setReleaseDate(request.getReleaseDate());
         movie.setAgeRating(request.getAgeRating());
         
-        // Cập nhật danh sách thể loại mới
         movie.setGenres(genres); 
     }
 
-    // =========================================================
-    // 🎯 HELPER METHODS
-    // =========================================================
     private String readString(Cell cell) {
         if (cell == null) return null;
         cell.setCellType(CellType.STRING);
