@@ -4,6 +4,8 @@ import com.example.cinema.dto.ApiResponse;
 import com.example.cinema.dto.PromotionRequest;
 import com.example.cinema.entity.Promotion;
 import com.example.cinema.service.PromotionService;
+
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -42,7 +44,7 @@ public class PromotionController {
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Promotion>> create(
-            @ModelAttribute PromotionRequest request, // THAY ĐỔI TẠI ĐÂY
+            @Valid @ModelAttribute PromotionRequest request,
             @RequestParam(value = "file", required = false) MultipartFile file) { // Dùng @RequestParam cho file
         return ResponseEntity.status(201).body(ApiResponse.<Promotion>builder()
                 .status(201).message("Tạo sự kiện thành công")
@@ -53,7 +55,7 @@ public class PromotionController {
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Promotion>> update(
             @PathVariable Long id,
-            @ModelAttribute PromotionRequest request, // THAY ĐỔI TẠI ĐÂY
+            @Valid @ModelAttribute PromotionRequest request,
             @RequestParam(value = "file", required = false) MultipartFile file) { // Dùng @RequestParam cho file
         return ResponseEntity.ok(ApiResponse.<Promotion>builder()
                 .status(200).message("Cập nhật thành công")

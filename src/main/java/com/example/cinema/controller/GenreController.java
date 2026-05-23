@@ -4,6 +4,8 @@ import com.example.cinema.dto.ApiResponse;
 import com.example.cinema.dto.GenreRequest;
 import com.example.cinema.entity.Genre;
 import com.example.cinema.service.GenreService;
+
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,7 +20,6 @@ public class GenreController {
 
     private final GenreService genreService;
 
-    // Lấy tất cả thể loại (Công khai cho khách xem)
     @GetMapping
     public ResponseEntity<ApiResponse<List<Genre>>> getAll() {
         return ResponseEntity.ok(ApiResponse.<List<Genre>>builder()
@@ -37,11 +38,11 @@ public class GenreController {
                 .build());
     }
 
-    // --- CHỈ ADMIN MỚI ĐƯỢC THAY ĐỔI ---
 
     @PostMapping
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
-    public ResponseEntity<ApiResponse<Genre>> create(@RequestBody GenreRequest request) {
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<Genre>> create(
+            @Valid @RequestBody GenreRequest request) {
         return ResponseEntity.ok(ApiResponse.<Genre>builder()
                 .status(201)
                 .message("Thêm thể loại thành công")
@@ -50,8 +51,10 @@ public class GenreController {
     }
 
     @PutMapping("/{id}")
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
-    public ResponseEntity<ApiResponse<Genre>> update(@PathVariable Integer id, @RequestBody GenreRequest request) {
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<Genre>> update(
+            @PathVariable Integer id,
+            @Valid @RequestBody GenreRequest request) {
         return ResponseEntity.ok(ApiResponse.<Genre>builder()
                 .status(200)
                 .message("Cập nhật thành công")
@@ -60,12 +63,12 @@ public class GenreController {
     }
 
     @DeleteMapping("/{id}")
-@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
-    public ResponseEntity<ApiResponse<String>> delete(@PathVariable Integer id) {
-        genreService.deleteGenre(id);
-        return ResponseEntity.ok(ApiResponse.<String>builder()
-                .status(200)
-                .message("Xóa thể loại thành công")
-                .build());
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+        public ResponseEntity<ApiResponse<String>> delete(@PathVariable Integer id) {
+            genreService.deleteGenre(id);
+            return ResponseEntity.ok(ApiResponse.<String>builder()
+                    .status(200)
+                    .message("Xóa thể loại thành công")
+                    .build());
+        }
     }
-}

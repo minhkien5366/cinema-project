@@ -17,9 +17,7 @@ public class Banner {
     private String title;
     private String imageUrl;
     private String linkUrl;
-    private String position;
     private String status;
-    private Integer sortOrder;
 
     @CreationTimestamp
     private LocalDateTime createdAt;

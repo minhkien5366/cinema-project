@@ -4,6 +4,8 @@ import com.example.cinema.dto.ApiResponse;
 import com.example.cinema.dto.BannerRequest;
 import com.example.cinema.entity.Banner;
 import com.example.cinema.service.BannerService;
+
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -35,7 +37,7 @@ public class BannerController {
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Banner>> createBanner(
-            @RequestPart("banner") BannerRequest request,
+            @Valid @RequestPart("banner") BannerRequest request, 
             @RequestPart(value = "file", required = false) MultipartFile file) {
         Banner banner = bannerService.createBanner(request, file);
         return ResponseEntity.ok(ApiResponse.<Banner>builder()
@@ -46,7 +48,7 @@ public class BannerController {
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Banner>> updateBanner(
             @PathVariable Long id,
-            @RequestPart("banner") BannerRequest request,
+            @Valid @RequestPart("banner") BannerRequest request, 
             @RequestPart(value = "file", required = false) MultipartFile file) {
         Banner banner = bannerService.updateBanner(id, request, file);
         return ResponseEntity.ok(ApiResponse.<Banner>builder()

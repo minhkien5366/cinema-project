@@ -9,7 +9,7 @@ public interface BannerService {
     List<Banner> getAllBanners();
     List<Banner> getActiveBanners();
     Banner getBannerById(Long id);
-    Banner createBanner(BannerRequest request, MultipartFile file); // Thêm file
-    Banner updateBanner(Long id, BannerRequest request, MultipartFile file); // Thêm file
+    Banner createBanner(BannerRequest request, MultipartFile file); 
+    Banner updateBanner(Long id, BannerRequest request, MultipartFile file); 
     void deleteBanner(Long id);
 }
