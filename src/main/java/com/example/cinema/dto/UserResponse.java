@@ -13,15 +13,24 @@ import java.util.Set;
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserResponse {
+
     private Long userId;
+
     private String email;
+
     private String firstName;
+
     private String lastName;
+
     private String mobileNumber;
-    private String avatar;
-    private String gender;       // THÊM DÒNG NÀY
-    private LocalDate dateOfBirth; // THÊM DÒNG NÀY
-    private Long managedCinemaItemId; // Thêm trường này
+
+    private String gender;
+
+    private LocalDate dateOfBirth;
+
+    private Long managedCinemaItemId;
+
     private Set<String> roles;
+
     private Integer points;
 }
