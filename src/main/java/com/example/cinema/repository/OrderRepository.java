@@ -82,26 +82,36 @@ Long countByCreatedAtBetweenAndStatus(
 );
 
 @Query("""
-    SELECT SUM(o.totalAmount)
-    FROM Order o
-    WHERE o.status = 'PAID'
-    AND o.createdAt >= :start
-    AND o.cinemaItem.id = :cinemaId
+SELECT DATE(o.createdAt), SUM(o.totalAmount)
+FROM Order o
+WHERE o.status = 'PAID'
+AND o.createdAt >= :start
+AND o.cinemaItem.id = :cinemaId
+GROUP BY DATE(o.createdAt)
+ORDER BY DATE(o.createdAt)
+""")
+List<Object[]> revenue7DaysByCinema(Long cinemaId, LocalDateTime start);
+@Query("""
+SELECT SUM(o.totalAmount)
+FROM Order o
+WHERE o.cinemaItem.id = :cinemaId
+AND o.createdAt >= :startOfDay
+AND o.status = 'PAID'
 """)
 Double getTodayRevenueByCinema(
-        Long cinemaId,
-        LocalDateTime start
+        @Param("cinemaId") Long cinemaId,
+        @Param("startOfDay") LocalDateTime startOfDay
 );
 
 @Query("""
-    SELECT COUNT(o.id)
-    FROM Order o
-    WHERE o.status = 'PAID'
-    AND o.createdAt >= :start
-    AND o.cinemaItem.id = :cinemaId
+SELECT COUNT(o)
+FROM Order o
+WHERE o.cinemaItem.id = :cinemaId
+AND o.createdAt >= :startOfDay
+AND o.status = 'PAID'
 """)
 Long countTodayTicketsByCinema(
-        Long cinemaId,
-        LocalDateTime start
+        @Param("cinemaId") Long cinemaId,
+        @Param("startOfDay") LocalDateTime startOfDay
 );
 }

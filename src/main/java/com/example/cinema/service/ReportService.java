@@ -14,5 +14,5 @@ public interface ReportService {
     List<Map<String, Object>> getCinemaRankingData(LocalDateTime start, LocalDateTime end);
     List<MovieRatingDTO> getMovieStatistics();
     AdminDashboardDTO getAdminDashboard(Long cinemaId);
-    List<RevenueChartDTO> getAdminRevenue7Days();
+    List<RevenueChartDTO> getAdminRevenue7Days(Long cinemaId);
 }

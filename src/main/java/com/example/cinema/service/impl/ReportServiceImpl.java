@@ -245,71 +245,32 @@ public class ReportServiceImpl implements ReportService {
 @Override
 public AdminDashboardDTO getAdminDashboard(Long cinemaId) {
 
-    LocalDateTime startOfDay =
-            LocalDate.now().atStartOfDay();
+    LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
 
     Double revenue;
     Long tickets;
     Long showtimes;
 
-    // =========================
-    // ADMIN -> THEO RẠP
-    // =========================
     if (cinemaId != null) {
 
-        revenue =
-                orderRepository
-                        .getTodayRevenueByCinema(
-                                cinemaId,
-                                startOfDay
-                        );
+        revenue = orderRepository.getTodayRevenueByCinema(cinemaId, startOfDay);
+        tickets = orderRepository.countTodayTicketsByCinema(cinemaId, startOfDay);
+        showtimes = showtimeRepository.countTodayShowtimesByCinema(cinemaId);
 
-        tickets =
-                orderRepository
-                        .countTodayTicketsByCinema(
-                                cinemaId,
-                                startOfDay
-                        );
+    } else {
 
-        showtimes =
-                showtimeRepository
-                        .countTodayShowtimesByCinema(
-                                cinemaId
-                        );
-
-    }
-
-    // =========================
-    // SUPER ADMIN -> TOÀN HỆ THỐNG
-    // =========================
-    else {
-
-        revenue =
-                orderRepository
-                        .getTodayRevenue(
-                                startOfDay
-                        );
-
-        tickets =
-                orderRepository
-                        .countTodayTickets(
-                                startOfDay
-                        );
-
-        showtimes =
-                showtimeRepository
-                        .countTodayShowtimes();
+        revenue = orderRepository.getTodayRevenue(startOfDay);
+        tickets = orderRepository.countTodayTickets(startOfDay);
+        showtimes = showtimeRepository.countTodayShowtimes();
     }
 
     revenue = revenue == null ? 0 : revenue;
     tickets = tickets == null ? 0 : tickets;
     showtimes = showtimes == null ? 0 : showtimes;
 
-    double occupancy =
-            showtimes > 0
-                    ? (tickets * 100.0)
-                    / (showtimes * 100)
-                    : 0;
+    double occupancy = showtimes > 0
+            ? (tickets * 100.0) / (showtimes * 100)
+            : 0;
 
     return new AdminDashboardDTO(
             revenue,
@@ -321,23 +282,19 @@ public AdminDashboardDTO getAdminDashboard(Long cinemaId) {
     // =========================
     // 📈 7 DAYS CHART
     // =========================
-    @Override
-    public List<RevenueChartDTO> getAdminRevenue7Days() {
+@Override
+public List<RevenueChartDTO> getAdminRevenue7Days(Long cinemaId) {
 
-        LocalDateTime start = LocalDateTime.now().minusDays(7);
+    LocalDateTime start = LocalDateTime.now().minusDays(7);
 
-        return orderRepository.revenue7Days(start)
-                .stream()
-                .map(o -> new RevenueChartDTO(
-                        o[0].toString(),
-                        ((Number) o[1]).doubleValue()
-                ))
-                .collect(Collectors.toList());
-    }
-
-    // =========================
-    // 💰 FINANCE HELPERS (FIXED)
-    // =========================
+    return orderRepository.revenue7DaysByCinema(cinemaId, start)
+            .stream()
+            .map(o -> new RevenueChartDTO(
+                    o[0].toString(),
+                    ((Number) o[1]).doubleValue()
+            ))
+            .collect(Collectors.toList());
+}
 
     private double calculateTax(Order order) {
         double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();

@@ -62,20 +62,22 @@ public ResponseEntity<?> getRanking(
 
 
 @PreAuthorize("hasRole('ADMIN')")
-    @GetMapping("/dashboard")
-    public ResponseEntity<?> dashboard() {
-        return ResponseEntity.ok(
-                reportService.getAdminDashboard(null)
-        );
-    }
+@GetMapping("/dashboard")
+public ResponseEntity<?> dashboard(
+        @RequestParam(required = false) Long cinemaId
+) {
+    return ResponseEntity.ok(
+            reportService.getAdminDashboard(cinemaId)
+    );
+}
+@PreAuthorize("hasRole('ADMIN')")
+@GetMapping("/revenue-7days")
+public ResponseEntity<?> chart(@RequestParam Long cinemaId) {
 
-    @PreAuthorize("hasRole('ADMIN')")
-    @GetMapping("/revenue-7days")
-    public ResponseEntity<?> chart() {
-        return ResponseEntity.ok(
-                reportService.getAdminRevenue7Days()
-        );
-    }
+    return ResponseEntity.ok(
+            reportService.getAdminRevenue7Days(cinemaId)
+    );
+}
 @PreAuthorize("hasRole('SUPER_ADMIN')")
 @GetMapping("/finance")
 public ResponseEntity<?> getFinanceReport(@RequestParam String month) {
