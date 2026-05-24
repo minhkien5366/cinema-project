@@ -81,4 +81,27 @@ Long countByCreatedAtBetweenAndStatus(
     String status
 );
 
+@Query("""
+    SELECT SUM(o.totalAmount)
+    FROM Order o
+    WHERE o.status = 'PAID'
+    AND o.createdAt >= :start
+    AND o.cinemaItem.id = :cinemaId
+""")
+Double getTodayRevenueByCinema(
+        Long cinemaId,
+        LocalDateTime start
+);
+
+@Query("""
+    SELECT COUNT(o.id)
+    FROM Order o
+    WHERE o.status = 'PAID'
+    AND o.createdAt >= :start
+    AND o.cinemaItem.id = :cinemaId
+""")
+Long countTodayTicketsByCinema(
+        Long cinemaId,
+        LocalDateTime start
+);
 }

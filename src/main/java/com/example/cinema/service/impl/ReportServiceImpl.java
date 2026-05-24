@@ -38,25 +38,33 @@ public class ReportServiceImpl implements ReportService {
     // =========================
     // 📊 EXPORT REVENUE REPORT
     // =========================
-    @Override
-    public ByteArrayInputStream exportRevenueReport(
-            Long cinemaId,
-            LocalDateTime start,
-            LocalDateTime end
-    ) throws IOException {
+        @Override
+        public ByteArrayInputStream exportRevenueReport(
+                Long cinemaId,
+                LocalDateTime start,
+                LocalDateTime end
+        ) throws IOException {
 
         List<Order> orders;
 
-        if (cinemaId != null) {
-            orders = orderRepository
-                    .findByCinemaItemIdAndCreatedAtBetweenAndStatus(
-                            cinemaId, start, end, "PAID"
-                    );
+        if (cinemaId != null && cinemaId > 0) {
+
+                orders = orderRepository
+                        .findByCinemaItemIdAndCreatedAtBetweenAndStatus(
+                                cinemaId,
+                                start,
+                                end,
+                                "PAID"
+                        );
+
         } else {
-            orders = orderRepository
-                    .findByCreatedAtBetweenAndStatus(
-                            start, end, "PAID"
-                    );
+
+                orders = orderRepository
+                        .findByCreatedAtBetweenAndStatus(
+                                start,
+                                end,
+                                "PAID"
+                        );
         }
 
         try (
@@ -64,46 +72,62 @@ public class ReportServiceImpl implements ReportService {
                 ByteArrayOutputStream out = new ByteArrayOutputStream()
         ) {
 
-            Sheet sheet = workbook.createSheet("Doanh Thu");
+                Sheet sheet = workbook.createSheet("Bao Cao Doanh Thu");
 
-            Font headerFont = workbook.createFont();
-            headerFont.setBold(true);
+                Font headerFont = workbook.createFont();
+                headerFont.setBold(true);
 
-            CellStyle headerStyle = workbook.createCellStyle();
-            headerStyle.setFont(headerFont);
+                CellStyle headerStyle = workbook.createCellStyle();
+                headerStyle.setFont(headerFont);
 
-            Row headerRow = sheet.createRow(0);
+                DataFormat format = workbook.createDataFormat();
 
-            String[] headers = {
-                    "Mã Đơn",
-                    "Rạp",
-                    "Ngày",
-                    "Tổng Tiền (Gross)",
-                    "Thuế (VAT)",
-                    "Doanh Thu Ròng",
-                    "Phương Thức"
-            };
+                CellStyle moneyStyle = workbook.createCellStyle();
+                moneyStyle.setDataFormat(
+                        format.getFormat("#,##0")
+                );
 
-            for (int i = 0; i < headers.length; i++) {
+                Row headerRow = sheet.createRow(0);
+
+                String[] headers = {
+                        "Mã Đơn",
+                        "Rạp",
+                        "Ngày Thanh Toán",
+                        "Tổng Tiền",
+                        "Thuế VAT",
+                        "Doanh Thu Ròng",
+                        "Phương Thức Thanh Toán"
+                };
+
+                for (int i = 0; i < headers.length; i++) {
+
                 Cell cell = headerRow.createCell(i);
+
                 cell.setCellValue(headers[i]);
+
                 cell.setCellStyle(headerStyle);
-            }
+                }
 
-            int rowIdx = 1;
+                int rowIdx = 1;
 
-            double totalGross = 0;
-            double totalTax = 0;
-            double totalNet = 0;
+                double totalGross = 0;
+                double totalTax = 0;
+                double totalNet = 0;
 
-            DateTimeFormatter formatter =
-                    DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+                DateTimeFormatter formatter =
+                        DateTimeFormatter.ofPattern(
+                                "dd/MM/yyyy HH:mm"
+                        );
 
-            for (Order order : orders) {
+                for (Order order : orders) {
 
-                double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();
+                double gross =
+                        order.getTotalAmount() == null
+                                ? 0
+                                : order.getTotalAmount();
 
                 double tax = gross * VAT_RATE;
+
                 double net = gross - tax;
 
                 totalGross += gross;
@@ -112,46 +136,71 @@ public class ReportServiceImpl implements ReportService {
 
                 Row row = sheet.createRow(rowIdx++);
 
-                row.createCell(0).setCellValue(order.getId());
+                row.createCell(0)
+                        .setCellValue(order.getId());
 
-                row.createCell(1).setCellValue(
-                        order.getCinemaItem() != null
-                                ? order.getCinemaItem().getName()
-                                : "N/A"
-                );
+                row.createCell(1)
+                        .setCellValue(
+                                order.getCinemaItem() != null
+                                        ? order.getCinemaItem().getName()
+                                        : "N/A"
+                        );
 
-                row.createCell(2).setCellValue(
-                        order.getCreatedAt().format(formatter)
-                );
+                row.createCell(2)
+                        .setCellValue(
+                                order.getCreatedAt()
+                                        .format(formatter)
+                        );
 
-                row.createCell(3).setCellValue(gross);
-                row.createCell(4).setCellValue(tax);
-                row.createCell(5).setCellValue(net);
+                Cell grossCell = row.createCell(3);
+                grossCell.setCellValue(gross);
+                grossCell.setCellStyle(moneyStyle);
 
-                row.createCell(6).setCellValue(
-                        order.getPaymentMethod() != null
-                                ? order.getPaymentMethod()
-                                : "N/A"
-                );
-            }
+                Cell taxCell = row.createCell(4);
+                taxCell.setCellValue(tax);
+                taxCell.setCellStyle(moneyStyle);
 
-            // TOTAL ROW
-            Row totalRow = sheet.createRow(rowIdx + 1);
+                Cell netCell = row.createCell(5);
+                netCell.setCellValue(net);
+                netCell.setCellStyle(moneyStyle);
 
-            totalRow.createCell(2).setCellValue("TỔNG CỘNG");
-            totalRow.createCell(3).setCellValue(totalGross);
-            totalRow.createCell(4).setCellValue(totalTax);
-            totalRow.createCell(5).setCellValue(totalNet);
+                row.createCell(6)
+                        .setCellValue(
+                                order.getPaymentMethod() != null
+                                        ? order.getPaymentMethod()
+                                        : "N/A"
+                        );
+                }
 
-            for (int i = 0; i < headers.length; i++) {
+                Row totalRow = sheet.createRow(rowIdx + 1);
+
+                Cell totalLabel = totalRow.createCell(2);
+                totalLabel.setCellValue("TỔNG CỘNG");
+                totalLabel.setCellStyle(headerStyle);
+
+                Cell totalGrossCell = totalRow.createCell(3);
+                totalGrossCell.setCellValue(totalGross);
+                totalGrossCell.setCellStyle(moneyStyle);
+
+                Cell totalTaxCell = totalRow.createCell(4);
+                totalTaxCell.setCellValue(totalTax);
+                totalTaxCell.setCellStyle(moneyStyle);
+
+                Cell totalNetCell = totalRow.createCell(5);
+                totalNetCell.setCellValue(totalNet);
+                totalNetCell.setCellStyle(moneyStyle);
+
+                for (int i = 0; i < headers.length; i++) {
                 sheet.autoSizeColumn(i);
-            }
+                }
 
-            workbook.write(out);
-            return new ByteArrayInputStream(out.toByteArray());
+                workbook.write(out);
+
+                return new ByteArrayInputStream(
+                        out.toByteArray()
+                );
         }
-    }
-
+        }
     // =========================
     // 🎬 CINEMA RANKING
     // =========================
@@ -193,31 +242,82 @@ public class ReportServiceImpl implements ReportService {
     // =========================
     // 📊 ADMIN DASHBOARD
     // =========================
-    @Override
-    public AdminDashboardDTO getAdminDashboard(Long cinemaId) {
+@Override
+public AdminDashboardDTO getAdminDashboard(Long cinemaId) {
 
-        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+    LocalDateTime startOfDay =
+            LocalDate.now().atStartOfDay();
 
-        Double revenue = orderRepository.getTodayRevenue(startOfDay);
-        Long tickets = orderRepository.countTodayTickets(startOfDay);
-        Long showtimes = showtimeRepository.countTodayShowtimes();
+    Double revenue;
+    Long tickets;
+    Long showtimes;
 
-        revenue = revenue == null ? 0 : revenue;
-        tickets = tickets == null ? 0 : tickets;
-        showtimes = showtimes == null ? 0 : showtimes;
+    // =========================
+    // ADMIN -> THEO RẠP
+    // =========================
+    if (cinemaId != null) {
 
-        double occupancy = showtimes > 0
-                ? (tickets * 100.0) / (showtimes * 100)
-                : 0;
+        revenue =
+                orderRepository
+                        .getTodayRevenueByCinema(
+                                cinemaId,
+                                startOfDay
+                        );
 
-        return new AdminDashboardDTO(
-                revenue,
-                tickets,
-                showtimes,
-                Math.min(100, occupancy)
-        );
+        tickets =
+                orderRepository
+                        .countTodayTicketsByCinema(
+                                cinemaId,
+                                startOfDay
+                        );
+
+        showtimes =
+                showtimeRepository
+                        .countTodayShowtimesByCinema(
+                                cinemaId
+                        );
+
     }
 
+    // =========================
+    // SUPER ADMIN -> TOÀN HỆ THỐNG
+    // =========================
+    else {
+
+        revenue =
+                orderRepository
+                        .getTodayRevenue(
+                                startOfDay
+                        );
+
+        tickets =
+                orderRepository
+                        .countTodayTickets(
+                                startOfDay
+                        );
+
+        showtimes =
+                showtimeRepository
+                        .countTodayShowtimes();
+    }
+
+    revenue = revenue == null ? 0 : revenue;
+    tickets = tickets == null ? 0 : tickets;
+    showtimes = showtimes == null ? 0 : showtimes;
+
+    double occupancy =
+            showtimes > 0
+                    ? (tickets * 100.0)
+                    / (showtimes * 100)
+                    : 0;
+
+    return new AdminDashboardDTO(
+            revenue,
+            tickets,
+            showtimes,
+            Math.min(100, occupancy)
+    );
+}
     // =========================
     // 📈 7 DAYS CHART
     // =========================

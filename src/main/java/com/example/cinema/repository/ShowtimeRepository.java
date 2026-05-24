@@ -84,4 +84,12 @@ public interface ShowtimeRepository extends JpaRepository<Showtime, Long> {
     List<Object[]> revenue7Days(
             @Param("start") LocalDateTime start
     );
+    @Query("""
+    SELECT COUNT(s.id)
+    FROM Showtime s
+    WHERE s.room.cinemaItem.id = :cinemaId
+""")
+Long countTodayShowtimesByCinema(
+        Long cinemaId
+);
 }
