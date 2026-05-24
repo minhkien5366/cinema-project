@@ -1,13 +1,13 @@
 package com.example.cinema.service.impl;
 
 import com.example.cinema.dto.ComboRequest;
-import com.example.cinema.entity.Combo;
-import com.example.cinema.entity.CinemaItem;
 import com.example.cinema.entity.CinemaCombo;
+import com.example.cinema.entity.CinemaItem;
+import com.example.cinema.entity.Combo;
 import com.example.cinema.exception.ResourceNotFoundException;
-import com.example.cinema.repository.ComboRepository;
-import com.example.cinema.repository.CinemaItemRepository;
 import com.example.cinema.repository.CinemaComboRepository;
+import com.example.cinema.repository.CinemaItemRepository;
+import com.example.cinema.repository.ComboRepository;
 import com.example.cinema.service.CloudinaryService;
 import com.example.cinema.service.ComboService;
 import lombok.RequiredArgsConstructor;
@@ -25,12 +25,8 @@ public class ComboServiceImpl implements ComboService {
 
     private final ComboRepository comboRepository;
     private final CloudinaryService cloudinaryService;
-    
-    // 🔥 BỔ SUNG CHÍ MẠNG: Tiêm các Repository liên quan để phân phối combo tự động về các rạp
     private final CinemaItemRepository cinemaItemRepository;
     private final CinemaComboRepository cinemaComboRepository;
-
-    // ================= GET =================
 
     @Override
     public List<Combo> getAllCombos() {
@@ -41,63 +37,96 @@ public class ComboServiceImpl implements ComboService {
     public Combo getComboById(Long id) {
         return comboRepository.findById(id)
                 .orElseThrow(() ->
-                        new ResourceNotFoundException("Combo không tồn tại ID: " + id));
+                        new ResourceNotFoundException(
+                                "Combo không tồn tại ID: " + id
+                        ));
     }
-
-    // ================= CREATE =================
 
     @Override
     @Transactional
-    public Combo createCombo(ComboRequest request, MultipartFile file) {
+    public Combo createCombo(
+            ComboRequest request,
+            MultipartFile file
+    ) {
+
+        if (file == null || file.isEmpty()) {
+            throw new RuntimeException(
+                    "Ảnh combo không được để trống!"
+            );
+        }
+
+        validateImage(file);
+
+        comboRepository.findByName(
+                request.getName().trim()
+        ).ifPresent(c -> {
+            throw new RuntimeException(
+                    "Tên combo đã tồn tại!"
+            );
+        });
 
         Combo combo = new Combo();
+
         mapRequest(request, combo);
 
-        uploadImageIfExist(combo, file);
+        uploadImage(combo, file);
 
-        // 1. Lưu combo tổng vào bảng gốc combos
-        Combo savedCombo = comboRepository.save(combo);
+        Combo savedCombo =
+                comboRepository.save(combo);
 
-        // 2. Lấy tất cả các chi nhánh rạp phim (CinemaItem) đang có trên hệ thống
-        List<CinemaItem> allCinemas = cinemaItemRepository.findAll();
+        List<CinemaItem> allCinemas =
+                cinemaItemRepository.findAll();
 
-        // 3. Tự động map combo mới này sang bảng trung gian cinema_combos cho từng rạp
-        List<CinemaCombo> cinemaCombos = allCinemas.stream().map(cinema -> {
-            CinemaCombo cc = new CinemaCombo();
-            cc.setCinemaItem(cinema);
-            cc.setCombo(savedCombo);
-            cc.setActive(true); // Mặc định mở bán công khai ở các rạp
-            cc.setStock(null);  // 🔥 ĐÚNG YÊU CẦU: Ép cứng null để SuperAdmin không can thiệp, Admin chi nhánh tự nhập kho sau
-            return cc;
-        }).collect(Collectors.toList());
+        List<CinemaCombo> cinemaCombos =
+                allCinemas.stream().map(cinema -> {
+                    CinemaCombo cc = new CinemaCombo();
+                    cc.setCinemaItem(cinema);
+                    cc.setCombo(savedCombo);
+                    cc.setActive(true);
+                    cc.setStock(null);
+                    return cc;
+                }).collect(Collectors.toList());
 
-        // 4. Lưu đồng loạt vào Database
         cinemaComboRepository.saveAll(cinemaCombos);
 
         return savedCombo;
     }
 
-    // ================= UPDATE =================
-
     @Override
     @Transactional
-    public Combo updateCombo(Long id, ComboRequest request, MultipartFile file) {
+    public Combo updateCombo(
+            Long id,
+            ComboRequest request,
+            MultipartFile file
+    ) {
 
         Combo combo = getComboById(id);
+
+        comboRepository.findByName(
+                request.getName().trim()
+        ).ifPresent(existing -> {
+
+            if (!existing.getId().equals(id)) {
+
+                throw new RuntimeException(
+                        "Tên combo đã tồn tại!"
+                );
+            }
+        });
 
         mapRequest(request, combo);
 
         if (file != null && !file.isEmpty()) {
 
+            validateImage(file);
+
             deleteOldImage(combo);
 
-            uploadImageIfExist(combo, file);
+            uploadImage(combo, file);
         }
 
         return comboRepository.save(combo);
     }
-
-    // ================= DELETE =================
 
     @Override
     @Transactional
@@ -107,11 +136,16 @@ public class ComboServiceImpl implements ComboService {
 
         deleteOldImage(combo);
 
-        // 🔥 PHÒNG NGỪA LỖI CONSTRAINT: Trước khi xóa combo gốc, dọn sạch liên kết trung gian ở các chi nhánh
-        // Nếu Repo của ông chưa viết custom query, dùng tạm đoạn này để quét sạch tránh dính Foreign Key crash DB
-        List<CinemaCombo> linkedCombos = cinemaComboRepository.findAll().stream()
-                .filter(cc -> cc.getCombo().getId().equals(id))
-                .collect(Collectors.toList());
+        List<CinemaCombo> linkedCombos =
+                cinemaComboRepository.findAll()
+                        .stream()
+                        .filter(cc ->
+                                cc.getCombo()
+                                        .getId()
+                                        .equals(id)
+                        )
+                        .collect(Collectors.toList());
+
         if (!linkedCombos.isEmpty()) {
             cinemaComboRepository.deleteAll(linkedCombos);
         }
@@ -119,32 +153,99 @@ public class ComboServiceImpl implements ComboService {
         comboRepository.delete(combo);
     }
 
-    // ================= HELPER =================
+    private void mapRequest(
+            ComboRequest request,
+            Combo combo
+    ) {
 
-    private void mapRequest(ComboRequest request, Combo combo) {
-        combo.setName(request.getName());
-        combo.setDescription(request.getDescription());
-        combo.setPrice(request.getPrice());
+        combo.setName(
+                request.getName().trim()
+        );
+
+        combo.setDescription(
+                request.getDescription().trim()
+        );
+
+        combo.setPrice(
+                request.getPrice()
+        );
     }
 
-    private void uploadImageIfExist(Combo combo, MultipartFile file) {
-        if (file == null || file.isEmpty()) return;
+    private void validateImage(
+            MultipartFile file
+    ) {
 
-        try {
-            String url = cloudinaryService.uploadImage(file, "combos");
-            combo.setImageUrl(url);
-        } catch (IOException e) {
-            throw new RuntimeException("Upload ảnh lỗi");
+        String contentType =
+                file.getContentType();
+
+        if (
+                contentType == null ||
+                (
+                        !contentType.equals("image/png") &&
+                        !contentType.equals("image/jpeg") &&
+                        !contentType.equals("image/jpg") &&
+                        !contentType.equals("image/webp")
+                )
+        ) {
+
+            throw new RuntimeException(
+                    "Ảnh phải là PNG, JPG, JPEG hoặc WEBP!"
+            );
+        }
+
+        long maxSize =
+                2 * 1024 * 1024;
+
+        if (file.getSize() > maxSize) {
+
+            throw new RuntimeException(
+                    "Ảnh không được vượt quá 2MB!"
+            );
         }
     }
 
-    private void deleteOldImage(Combo combo) {
-        if (combo.getImageUrl() == null) return;
+    private void uploadImage(
+            Combo combo,
+            MultipartFile file
+    ) {
 
         try {
-            cloudinaryService.deleteImage(combo.getImageUrl());
+
+            String url =
+                    cloudinaryService.uploadImage(
+                            file,
+                            "combos"
+                    );
+
+            combo.setImageUrl(url);
+
         } catch (IOException e) {
-            System.err.println("Không xoá được ảnh cũ");
+
+            throw new RuntimeException(
+                    "Upload ảnh thất bại!"
+            );
+        }
+    }
+
+    private void deleteOldImage(
+            Combo combo
+    ) {
+
+        if (combo.getImageUrl() == null) {
+            return;
+        }
+
+        try {
+
+            cloudinaryService.deleteImage(
+                    combo.getImageUrl()
+            );
+
+        } catch (IOException e) {
+
+            System.err.println(
+                    "Không xoá được ảnh cũ"
+            );
         }
     }
 }

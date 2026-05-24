@@ -49,15 +49,19 @@ public class SeatPriceConfigServiceImpl implements SeatPriceConfigService {
 
         SeatPriceConfig config = repository.findById(id)
                 .orElseThrow(() ->
-                        new ResourceNotFoundException("Không tìm thấy cấu hình giá"));
+                        new ResourceNotFoundException(
+                                "Không tìm thấy cấu hình giá"
+                        ));
 
-        // ✅ check duplicate khi update (PRO FIX)
         repository.findBySeatTypeAndDayOfWeek(
                 request.getSeatType().toUpperCase(),
                 request.getDayOfWeek()
         ).ifPresent(existing -> {
+
             if (!existing.getId().equals(id)) {
-                throw new RuntimeException("Cấu hình giá đã tồn tại!");
+                throw new RuntimeException(
+                        "Cấu hình giá đã tồn tại!"
+                );
             }
         });
 

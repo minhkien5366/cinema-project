@@ -3,8 +3,13 @@ package com.example.cinema.controller;
 import com.example.cinema.dto.ComboAdminResponse;
 import com.example.cinema.dto.ComboClientResponse; 
 import com.example.cinema.dto.ApiResponse;
+import com.example.cinema.dto.ComboAdminRequest;
 import com.example.cinema.service.CinemaComboService;
+
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -26,19 +31,16 @@ public class CinemaComboController {
         return cinemaComboService.toggleCombo(comboId);
     }
 
-    // 🔥 TÍNH NĂNG MỚI: Endpoint cho phép Admin chi nhánh cập nhật số lượng tồn kho bắp nước
-    @PutMapping("/{comboId}/stock")
-    public ApiResponse<Void> updateStock(
-            @PathVariable Long comboId, 
-            @RequestParam Integer stock) {
-        
-        cinemaComboService.updateComboStock(comboId, stock);
-        
-        return ApiResponse.<Void>builder()
-                .status(200)
-                .message("Cập nhật số lượng tồn kho thành công!")
-                .build();
-    }
+@PutMapping("/{comboId}/stock")
+public ResponseEntity<?> updateStock(
+        @PathVariable Long comboId,
+        @Valid @RequestBody ComboAdminRequest request
+) {
+
+    cinemaComboService.updateComboStock(comboId, request);
+
+    return ResponseEntity.ok().build();
+}
 
     @GetMapping("/{cinemaItemId}/combos")
     public ApiResponse<List<ComboClientResponse>> getActiveCombos(

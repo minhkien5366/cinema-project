@@ -1,5 +1,6 @@
 package com.example.cinema.service.impl;
 
+import com.example.cinema.dto.ComboAdminRequest;
 import com.example.cinema.dto.ComboAdminResponse;
 import com.example.cinema.dto.ComboClientResponse; // 🔥 Tiêm DTO mới của khách hàng vào đây
 import com.example.cinema.entity.*;
@@ -100,56 +101,54 @@ public class CinemaComboServiceImpl implements CinemaComboService {
 
     // ================= UPDATE STOCK FOR ADMIN (HÀM MỚI TINH) =================
 
-    @Override
-    @Transactional
-    public void updateComboStock(Long comboId, Integer stock) {
-        // 1. Xác định Admin chi nhánh đang thao tác thuộc rạp nào
+        @Override
+        @Transactional
+        public void updateComboStock(Long comboId, ComboAdminRequest request) {
+
         User user = getCurrentUser();
         Long cinemaItemId = user.getManagedCinemaItemId();
 
         if (cinemaItemId == null) {
-            throw new RuntimeException("Tài khoản của ông chưa được gán quyền quản lý chi nhánh nào!");
+                throw new RuntimeException(
+                        "Tài khoản của bạn chưa được gán quyền quản lý chi nhánh nào!"
+                );
         }
 
-        // 2. Chặn lỗi logic nếu nhập số âm
-        if (stock != null && stock < 0) {
-            throw new RuntimeException("Số lượng tồn kho không được nhỏ hơn 0!");
-        }
-
-        // 3. Tìm cấu hình bắp nước của chi nhánh dưới Database
         CinemaCombo cinemaCombo = cinemaComboRepository
                 .findByCinemaItemIdAndComboId(cinemaItemId, comboId)
                 .orElse(null);
 
         if (cinemaCombo == null) {
-            // Phòng hờ dữ liệu cũ chưa được map tự động, hệ thống tự động sinh liên kết trung gian
-            CinemaItem cinemaItem = cinemaItemRepository.findById(cinemaItemId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy chi nhánh rạp"));
-            Combo combo = comboRepository.findById(comboId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Combo không tồn tại"));
 
-            cinemaCombo = new CinemaCombo();
-            cinemaCombo.setCinemaItem(cinemaItem);
-            cinemaCombo.setCombo(combo);
-            cinemaCombo.setActive(true);
+                CinemaItem cinemaItem = cinemaItemRepository
+                        .findById(cinemaItemId)
+                        .orElseThrow(() ->
+                                new ResourceNotFoundException("Không tìm thấy chi nhánh rạp"));
+
+                Combo combo = comboRepository
+                        .findById(comboId)
+                        .orElseThrow(() ->
+                                new ResourceNotFoundException("Combo không tồn tại"));
+
+                cinemaCombo = new CinemaCombo();
+                cinemaCombo.setCinemaItem(cinemaItem);
+                cinemaCombo.setCombo(combo);
+                cinemaCombo.setActive(true);
         }
 
-        // 4. Lưu số lượng hàng mới cập nhật xuống DB
-        cinemaCombo.setStock(stock);
-        cinemaComboRepository.save(cinemaCombo);
-    }
 
+        cinemaCombo.setStock(request.getStock());
+
+        cinemaComboRepository.save(cinemaCombo);
+        }
     // ================= CUSTOMER (CẬP NHẬT CHUẨN ĐÉT KÈM STOCK) =================
 
     @Override
     public List<ComboClientResponse> getActiveCombosForCinema(Long cinemaItemId) {
-        // 1. Lấy toàn bộ danh mục combo tổng
         List<Combo> allCombos = comboRepository.findAll();
 
-        // 2. Lấy toàn bộ cấu hình thực tế của chi nhánh rạp này
         List<CinemaCombo> configs = cinemaComboRepository.findByCinemaItemId(cinemaItemId);
 
-        // 3. Quy quét so khớp để bóc tách trạng thái hoạt động và số lượng tồn kho
         return allCombos.stream()
                 .map(combo -> {
                     CinemaCombo config = configs.stream()
@@ -157,13 +156,10 @@ public class CinemaComboServiceImpl implements CinemaComboService {
                             .findFirst()
                             .orElse(null);
 
-                    // Nếu config chưa tồn tại (data cũ) thì mặc định là true, ngược lại lấy trạng thái thật của rạp
                     boolean isActive = config == null || config.isActive();
                     
-                    // Lấy số lượng kho thực tế của rạp, nếu config rỗng thì gán null để chặn an toàn
                     Integer stock = config != null ? config.getStock() : null;
 
-                    // Chỉ trả về những combo được bật active = true cho giao diện người dùng đặt vé
                     if (isActive) {
                         return ComboClientResponse.builder()
                                 .id(combo.getId())
@@ -171,12 +167,12 @@ public class CinemaComboServiceImpl implements CinemaComboService {
                                 .description(combo.getDescription())
                                 .imageUrl(combo.getImageUrl())
                                 .price(combo.getPrice())
-                                .stock(stock) // 🔥 BẮN STOCK VỀ CHO FRONTEND CHECK LUÔN
+                                .stock(stock)
                                 .build();
                     }
                     return null;
                 })
-                .filter(Objects::nonNull) // Lọc bỏ những combo bị gán null (active = false)
+                .filter(Objects::nonNull) 
                 .collect(Collectors.toList());
     }
 
@@ -188,6 +184,6 @@ public class CinemaComboServiceImpl implements CinemaComboService {
 
         return userRepository.findByEmail(email)
                 .orElseThrow(() ->
-                        new ResourceNotFoundException("User not found"));
+                        new ResourceNotFoundException("Không tìm thấy người dùng với email: " + email));
     }
 }

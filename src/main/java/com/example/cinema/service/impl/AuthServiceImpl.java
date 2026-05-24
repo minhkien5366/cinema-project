@@ -26,19 +26,23 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider jwtTokenProvider;
 
     @Override
-    public JwtResponse login(LoginRequest loginRequest) {
-        // 1. Xác thực thông tin người dùng
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+    public JwtResponse login(LoginRequest loginRequest) { try {
+        Authentication authentication =
+            authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                    loginRequest.getEmail().trim(),
+                    loginRequest.getPassword())
+                );
+        SecurityContextHolder.getContext()
+                .setAuthentication(authentication);
+        String token =
+                jwtTokenProvider.generateToken(authentication);
 
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-        
-        // 2. Tạo JWT Token
-        String token = jwtTokenProvider.generateToken(authentication);
-
-        // 3. Lấy danh sách quyền (Roles) trả về cho Frontend
-        List<String> roles = authentication.getAuthorities().stream()
-                .map(item -> item.getAuthority()).collect(Collectors.toList());
+        List<String> roles =
+                authentication.getAuthorities()
+                        .stream()
+                        .map(item -> item.getAuthority())
+                        .collect(Collectors.toList());
 
         return JwtResponse.builder()
                 .token(token)
@@ -46,8 +50,17 @@ public class AuthServiceImpl implements AuthService {
                 .roles(roles)
                 .type("Bearer")
                 .build();
-    }
+    } catch (BadCredentialsException e) {
+        throw new RuntimeException(
+                "Email hoặc mật khẩu không chính xác!"
+        );
+    } catch (Exception e) {
 
+        throw new RuntimeException(
+                "Đăng nhập thất bại!"
+        );
+    }
+}
    @Override
     @Transactional
     public String register(RegisterRequest registerRequest) {
