@@ -37,6 +37,9 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
 
     boolean existsBySeat_Room_Id(Long roomId);
 
+    // 🎯 THÊM MỚI TẠI ĐÂY: Hàm gác cổng kiểm tra trạng thái vé của suất chiếu
+    boolean existsByShowtimeIdAndStatus(Long showtimeId, String status);
+
     // --- FIX LỖI 1: Ràng buộc đã xem xong phim ---
     boolean existsByUser_UserIdAndShowtime_Movie_IdAndStatusAndShowtime_EndTimeBefore(
         Long userId, Long movieId, String status, LocalDateTime now);
@@ -48,6 +51,7 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     List<Ticket> findBySeatIdAndShowtimeId(Long seatId, Long showtimeId);
     
     boolean existsBySeatAndShowtimeAndStatusNotIgnoreCase(Seat seat, Showtime showtime, String status);
+    
     // 🎯 THÊM MỚI: Lấy danh sách Top phim bán chạy nhất dựa trên tổng số vé đã thanh toán
     @Query("SELECT m.id AS movieId, m.title AS title, m.posterUrl AS posterUrl, COUNT(t.id) AS totalTickets " +
            "FROM Ticket t " +
