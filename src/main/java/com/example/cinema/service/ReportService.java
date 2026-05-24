@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.example.cinema.dto.AdminDashboardDTO;
+import com.example.cinema.dto.ComboReportResponse;
 import com.example.cinema.dto.MovieRatingDTO;
 import com.example.cinema.dto.RevenueChartDTO;
 public interface ReportService {
@@ -15,4 +16,5 @@ public interface ReportService {
     List<MovieRatingDTO> getMovieStatistics();
     AdminDashboardDTO getAdminDashboard(Long cinemaId);
     List<RevenueChartDTO> getAdminRevenue7Days(Long cinemaId);
+    List<ComboReportResponse> getBestSellingCombos(Long cinemaId, LocalDateTime start, LocalDateTime end);
 }

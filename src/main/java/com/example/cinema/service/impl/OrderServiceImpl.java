@@ -197,8 +197,12 @@ public class OrderServiceImpl implements OrderService {
             for (OrderRequest.ComboOrderDTO cReq : request.getCombos()) {
                 Combo combo = comboRepository.findById(cReq.getComboId()).orElseThrow(() -> new ResourceNotFoundException("Combo không tồn tại"));
                 OrderDetail d = new OrderDetail();
-                d.setOrder(savedOrder); d.setItemType("COMBO"); d.setItemId(cReq.getComboId()); d.setQuantity(cReq.getQuantity()); d.setPrice(combo.getPrice());
-                details.add(d);
+                d.setOrder(savedOrder);
+                d.setItemType("COMBO");
+                d.setItemId(combo.getId());
+                d.setItemName(combo.getName());
+                d.setQuantity(cReq.getQuantity());
+                d.setPrice(combo.getPrice());                details.add(d);
                 total += (combo.getPrice() * cReq.getQuantity());
             }
         }

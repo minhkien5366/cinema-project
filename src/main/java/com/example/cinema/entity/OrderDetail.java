@@ -16,14 +16,19 @@ public class OrderDetail {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
     private String itemType; // TICKET hoặc COMBO
-    private Long itemId;     // ID của Seat (nếu là TICKET) hoặc ID của Combo
+    private Long itemId;     
+
+    // 🔥 THÊM: lưu snapshot tên để report combo không phải join
+    private String itemName;
+
     private Integer quantity;
     private Double price;
 
-    @ManyToOne(fetch = FetchType.LAZY) // Ép LAZY để tải mượt hơn
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "order_id")
-    @ToString.Exclude // 🎯 CHÍ MẠNG: Ngắt đệ quy, cấm không cho gọi ngược lên bảng cha Order
+    @ToString.Exclude
     private Order order;
 
     @CreationTimestamp

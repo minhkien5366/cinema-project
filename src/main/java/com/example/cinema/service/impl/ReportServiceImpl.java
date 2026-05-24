@@ -1,6 +1,7 @@
 package com.example.cinema.service.impl;
 
 import com.example.cinema.dto.AdminDashboardDTO;
+import com.example.cinema.dto.ComboReportResponse;
 import com.example.cinema.dto.MovieRatingDTO;
 import com.example.cinema.dto.RevenueChartDTO;
 import com.example.cinema.entity.Order;
@@ -8,6 +9,7 @@ import com.example.cinema.repository.ShowtimeRepository;
 import com.example.cinema.repository.OrderRepository;
 import com.example.cinema.repository.ReviewRepository;
 import com.example.cinema.service.ReportService;
+import com.example.cinema.repository.OrderDetailRepository;
 
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -33,11 +35,12 @@ public class ReportServiceImpl implements ReportService {
     @Autowired
     private ShowtimeRepository showtimeRepository;
 
+    @Autowired
+    private OrderDetailRepository orderDetailRepository;
+
     private static final double VAT_RATE = 0.10;
 
-    // =========================
-    // 📊 EXPORT REVENUE REPORT
-    // =========================
+
         @Override
         public ByteArrayInputStream exportRevenueReport(
                 Long cinemaId,
@@ -201,109 +204,104 @@ public class ReportServiceImpl implements ReportService {
                 );
         }
         }
-    // =========================
-    // 🎬 CINEMA RANKING
-    // =========================
-    @Override
-    public List<Map<String, Object>> getCinemaRankingData(
-            LocalDateTime start,
-            LocalDateTime end
-    ) {
 
-        return orderRepository
-                .getCinemaRanking(start, end)
+        @Override
+        public List<Map<String, Object>> getCinemaRankingData(
+                LocalDateTime start,
+                LocalDateTime end
+        ) {
+
+                return orderRepository
+                        .getCinemaRanking(start, end)
+                        .stream()
+                        .map(obj -> {
+                        Map<String, Object> map = new HashMap<>();
+                        map.put("name", obj[0]);
+                        map.put("revenue", obj[1]);
+                        return map;
+                        })
+                        .collect(Collectors.toList());
+        }
+
+        @Override
+        public List<MovieRatingDTO> getMovieStatistics() {
+
+                return reviewRepository
+                        .getTopRatedMovies()
+                        .stream()
+                        .map(obj -> new MovieRatingDTO(
+                                (String) obj[0],
+                                ((Number) obj[1]).doubleValue(),
+                                ((Number) obj[2]).longValue()
+                        ))
+                        .collect(Collectors.toList());
+        }
+
+        @Override
+        public AdminDashboardDTO getAdminDashboard(Long cinemaId) {
+
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+
+        Double revenue;
+        Long tickets;
+        Long showtimes;
+
+        if (cinemaId != null) {
+
+                revenue = orderRepository.getTodayRevenueByCinema(cinemaId, startOfDay);
+                tickets = orderRepository.countTodayTicketsByCinema(cinemaId, startOfDay);
+                showtimes = showtimeRepository.countTodayShowtimesByCinema(cinemaId);
+
+        } else {
+
+                revenue = orderRepository.getTodayRevenue(startOfDay);
+                tickets = orderRepository.countTodayTickets(startOfDay);
+                showtimes = showtimeRepository.countTodayShowtimes();
+        }
+
+        revenue = revenue == null ? 0 : revenue;
+        tickets = tickets == null ? 0 : tickets;
+        showtimes = showtimes == null ? 0 : showtimes;
+
+        double occupancy = showtimes > 0
+                ? (tickets * 100.0) / (showtimes * 100)
+                : 0;
+
+        return new AdminDashboardDTO(
+                revenue,
+                tickets,
+                showtimes,
+                Math.min(100, occupancy)
+        );
+        }
+
+        @Override
+        public List<RevenueChartDTO> getAdminRevenue7Days(Long cinemaId) {
+
+        LocalDateTime start = LocalDateTime.now().minusDays(7);
+
+        return orderRepository.revenue7DaysByCinema(cinemaId, start)
                 .stream()
-                .map(obj -> {
-                    Map<String, Object> map = new HashMap<>();
-                    map.put("name", obj[0]);
-                    map.put("revenue", obj[1]);
-                    return map;
-                })
-                .collect(Collectors.toList());
-    }
-
-    // =========================
-    // 🎥 MOVIE STATS
-    // =========================
-    @Override
-    public List<MovieRatingDTO> getMovieStatistics() {
-
-        return reviewRepository
-                .getTopRatedMovies()
-                .stream()
-                .map(obj -> new MovieRatingDTO(
-                        (String) obj[0],
-                        ((Number) obj[1]).doubleValue(),
-                        ((Number) obj[2]).longValue()
+                .map(o -> new RevenueChartDTO(
+                        o[0].toString(),
+                        ((Number) o[1]).doubleValue()
                 ))
                 .collect(Collectors.toList());
-    }
+        }
 
-    // =========================
-    // 📊 ADMIN DASHBOARD
-    // =========================
-@Override
-public AdminDashboardDTO getAdminDashboard(Long cinemaId) {
+        private double calculateTax(Order order) {
+                double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();
+                return gross * VAT_RATE;
+        }
 
-    LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        private double calculateNetRevenue(Order order) {
+                double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();
+                double tax = calculateTax(order);
+                return gross - tax;
+        }
 
-    Double revenue;
-    Long tickets;
-    Long showtimes;
-
-    if (cinemaId != null) {
-
-        revenue = orderRepository.getTodayRevenueByCinema(cinemaId, startOfDay);
-        tickets = orderRepository.countTodayTicketsByCinema(cinemaId, startOfDay);
-        showtimes = showtimeRepository.countTodayShowtimesByCinema(cinemaId);
-
-    } else {
-
-        revenue = orderRepository.getTodayRevenue(startOfDay);
-        tickets = orderRepository.countTodayTickets(startOfDay);
-        showtimes = showtimeRepository.countTodayShowtimes();
-    }
-
-    revenue = revenue == null ? 0 : revenue;
-    tickets = tickets == null ? 0 : tickets;
-    showtimes = showtimes == null ? 0 : showtimes;
-
-    double occupancy = showtimes > 0
-            ? (tickets * 100.0) / (showtimes * 100)
-            : 0;
-
-    return new AdminDashboardDTO(
-            revenue,
-            tickets,
-            showtimes,
-            Math.min(100, occupancy)
-    );
-}
-    // =========================
-    // 📈 7 DAYS CHART
-    // =========================
-@Override
-public List<RevenueChartDTO> getAdminRevenue7Days(Long cinemaId) {
-
-    LocalDateTime start = LocalDateTime.now().minusDays(7);
-
-    return orderRepository.revenue7DaysByCinema(cinemaId, start)
-            .stream()
-            .map(o -> new RevenueChartDTO(
-                    o[0].toString(),
-                    ((Number) o[1]).doubleValue()
-            ))
-            .collect(Collectors.toList());
-}
-
-    private double calculateTax(Order order) {
-        double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();
-        return gross * VAT_RATE;
-    }
-
-    private double calculateNetRevenue(Order order) {
-        double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();
-        double tax = calculateTax(order);
-        return gross - tax;
-    }
+        @Override
+        public List<ComboReportResponse> getBestSellingCombos(Long cinemaId, LocalDateTime start, LocalDateTime end) {
+        return orderDetailRepository.getBestSellingCombos(cinemaId, start, end);
+        }
 }
