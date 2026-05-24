@@ -351,7 +351,7 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(savedOrder);
     }
 
-    @Override
+  @Override
     public OrderResponse scanOrderTicket(String bookingCode) {
         User staff = getCurrentUser();
 
@@ -364,9 +364,25 @@ public class OrderServiceImpl implements OrderService {
         }
 
         Ticket sampleTicket = tickets.get(0);
+        
+        // 🔥 KIỂM TRA ĐÚNG RẠP NGAY TẠI ĐÂY (Fail-fast: Sai rạp là chặn luôn)
+        if (isSuperAdmin(staff)) {
+            throw new RuntimeException("Tài khoản Super Admin không có quyền soát vé trực tiếp tại quầy!");
+        }
+
+        if (sampleTicket.getShowtime() == null || sampleTicket.getShowtime().getCinemaItem() == null) {
+            throw new RuntimeException("Dữ liệu suất chiếu hoặc cơ sở rạp đính kèm vé bị lỗi!");
+        }
+
+        Long ticketCinemaId = sampleTicket.getShowtime().getCinemaItem().getId();
+        if (staff.getManagedCinemaItemId() == null || !staff.getManagedCinemaItemId().equals(ticketCinemaId)) {
+            throw new RuntimeException("Xâm nhập sai chi nhánh! Vé này được mua tại cụm rạp '" + sampleTicket.getShowtime().getCinemaItem().getName() + "', không thể soát tại đây.");
+        }
+
+        // Tiếp tục xử lý nếu đúng rạp
         Seat seat = sampleTicket.getSeat();
         if (seat == null) {
-            throw new RuntimeException("Dữ liệu vật lý ghế ngồi dính kèm mã đặt vé bị lỗi!");
+            throw new RuntimeException("Dữ liệu vật lý ghế ngồi đính kèm mã đặt vé bị lỗi!");
         }
 
         List<OrderDetail> matchingDetails = orderDetailRepository.findAll().stream()
@@ -383,14 +399,6 @@ public class OrderServiceImpl implements OrderService {
 
         if (order == null) {
             throw new ResourceNotFoundException("Không tìm thấy hóa đơn gốc đi kèm mã đặt vé này!");
-        }
-
-        if (isSuperAdmin(staff)) {
-            throw new RuntimeException("Tài khoản Super Admin không có quyền soát vé trực tiếp tại quầy!");
-        }
-
-        if (staff.getManagedCinemaItemId() == null || !staff.getManagedCinemaItemId().equals(order.getCinemaItem().getId())) {
-            throw new RuntimeException("Xâm nhập sai chi nhánh! Vé này thuộc cụm rạp '" + order.getCinemaItem().getName() + "'.");
         }
 
         String currentStatus = order.getStatus().toUpperCase();
@@ -415,7 +423,6 @@ public class OrderServiceImpl implements OrderService {
 
         return mapToResponse(order);
     }
-
     @Override
     @Transactional
     public OrderResponse confirmCheckIn(Long orderId) {

@@ -34,4 +34,5 @@ public interface OrderDetailRepository extends JpaRepository<OrderDetail, Long> 
             @Param("start") LocalDateTime start,
             @Param("end") LocalDateTime end
     );
+    List<OrderDetail> findByItemTypeAndItemId(String itemType, Long itemId);
 }

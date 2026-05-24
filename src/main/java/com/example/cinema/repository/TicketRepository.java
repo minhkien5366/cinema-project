@@ -36,6 +36,8 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     boolean existsBySeatId(Long seatId);
 
     boolean existsBySeat_Room_Id(Long roomId);
+    
+    List<Ticket> findByBookingCodeIgnoreCase(String bookingCode);
 
     // 🎯 THÊM MỚI TẠI ĐÂY: Hàm gác cổng kiểm tra trạng thái vé của suất chiếu
     boolean existsByShowtimeIdAndStatus(Long showtimeId, String status);
