@@ -8,7 +8,6 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Ánh xạ URL /uploads/movies/** vào thư mục vật lý uploads/movies/
         registry.addResourceHandler("/uploads/**")
                 .addResourceLocations("file:uploads/");
     }
