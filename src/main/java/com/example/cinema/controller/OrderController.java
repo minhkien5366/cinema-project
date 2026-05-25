@@ -26,7 +26,7 @@ public class OrderController {
     private final OrderService orderService;
 
     // Đường dẫn trang Frontend mà ông muốn chuyển về sau khi thanh toán
-    @Value("${frontend.url:http://localhost:3000}")
+    @Value("${frontend.url:https://akcinema.vercel.app}")
     private String frontendUrl;
 
     @PostMapping
