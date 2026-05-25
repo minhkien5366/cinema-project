@@ -49,9 +49,8 @@ public class OrderServiceImpl implements OrderService {
     private String vnp_TmnCode;
     @Value("${vnpay.hashSecret:QTZTTGZMCYALZMMYVOTZMMZLXUKYVMLM}")
     private String vnp_HashSecret;
-    @Value("${vnpay.returnUrl:http://localhost:8080/api/v1/orders/vnpay-callback}")
+    @Value("${vnpay.returnUrl:https://akcinema-api.onrender.com/api/v1/orders/vnpay-callback}")
     private String vnp_ReturnUrl;
-
     @Override
     @Transactional
     public OrderResponse createOrder(OrderRequest request) {
