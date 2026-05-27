@@ -12,4 +12,5 @@ public interface OrderService {
     OrderResponse updateOrderStatus(Long orderId, String newStatus);
     OrderResponse scanOrderTicket(String bookingCode);
     OrderResponse confirmCheckIn(Long orderId);
+    String cancelOrder(Long orderId);
 }

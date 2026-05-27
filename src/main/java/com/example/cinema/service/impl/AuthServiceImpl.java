@@ -92,6 +92,13 @@ public class AuthServiceImpl implements AuthService {
         if (userRepository.existsByEmail(email)) {
             throw new RuntimeException("Email đã tồn tại!");
         }
+        
+        // 🎯 FIX MỚI: Kiểm tra xem số điện thoại đã tồn tại trong DB chưa
+        String mobileNumber = request.getMobileNumber().trim();
+        if (userRepository.existsByMobileNumber(mobileNumber)) {
+            throw new RuntimeException("Số điện thoại này đã được đăng ký!");
+        }
+
         if (request.getPassword() == null || request.getPassword().length() < 6) {
             throw new RuntimeException("Mật khẩu phải ít nhất 6 ký tự");
         }
@@ -101,11 +108,11 @@ public class AuthServiceImpl implements AuthService {
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setFirstName(request.getFirstName());
         user.setLastName(request.getLastName());
-        user.setMobileNumber(request.getMobileNumber());
+        user.setMobileNumber(mobileNumber);
         user.setGender(request.getGender());
         user.setDateOfBirth(request.getDateOfBirth());
 
-        // 5. role
+        // role
         Role userRole = roleRepository.findByRoleName(ROLE_USER)
                 .orElseThrow(() -> new RuntimeException("ROLE_USER chưa tồn tại"));
 
@@ -115,6 +122,7 @@ public class AuthServiceImpl implements AuthService {
 
         return "Đăng ký tài khoản thành công!";
     }
+    
     // ================= FORGOT PASSWORD =================
     @Override
     public String forgotPassword(String email) {

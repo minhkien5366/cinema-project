@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OrderServiceImpl implements OrderService {
 
+    private final CinemaComboRepository cinemaComboRepository;
     private final OrderRepository orderRepository;
     private final OrderDetailRepository orderDetailRepository;
     private final UserRepository userRepository;
@@ -49,9 +50,10 @@ public class OrderServiceImpl implements OrderService {
     private String vnp_TmnCode;
     @Value("${vnpay.hashSecret:QTZTTGZMCYALZMMYVOTZMMZLXUKYVMLM}")
     private String vnp_HashSecret;
-    @Value("${vnpay.returnUrl:https://akcinema-api.onrender.com/api/v1/orders/vnpay-callback}")
+    @Value("${vnpay.returnUrl:http://localhost:8080/api/v1/orders/vnpay-callback}")
     private String vnp_ReturnUrl;
-    @Override
+
+  @Override
     @Transactional
     public OrderResponse createOrder(OrderRequest request) {
         User user = getCurrentUser();
@@ -194,38 +196,68 @@ public class OrderServiceImpl implements OrderService {
 
         if (request.getCombos() != null) {
             for (OrderRequest.ComboOrderDTO cReq : request.getCombos()) {
-                Combo combo = comboRepository.findById(cReq.getComboId()).orElseThrow(() -> new ResourceNotFoundException("Combo không tồn tại"));
+                Combo combo = comboRepository.findById(cReq.getComboId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Combo không tồn tại"));
+                
+                CinemaCombo cinemaCombo = cinemaComboRepository
+                        .findByCinemaItemIdAndComboId(showtime.getCinemaItem().getId(), combo.getId())
+                        .orElseThrow(() -> new RuntimeException("Combo " + combo.getName() + " hiện không bán tại rạp này!"));
+
+                if (!cinemaCombo.isActive()) {
+                    throw new RuntimeException("Combo " + combo.getName() + " đang tạm ngưng phục vụ tại rạp này!");
+                }
+
+                if (cinemaCombo.getStock() == null || cinemaCombo.getStock() < cReq.getQuantity()) {
+                    throw new RuntimeException("Combo " + combo.getName() + " không đủ số lượng trong kho của rạp!");
+                }
+
+                cinemaCombo.setStock(cinemaCombo.getStock() - cReq.getQuantity());
+                cinemaComboRepository.save(cinemaCombo);
+
                 OrderDetail d = new OrderDetail();
                 d.setOrder(savedOrder);
                 d.setItemType("COMBO");
                 d.setItemId(combo.getId());
                 d.setItemName(combo.getName());
                 d.setQuantity(cReq.getQuantity());
-                d.setPrice(combo.getPrice());                details.add(d);
+                d.setPrice(combo.getPrice());                
+                details.add(d);
                 total += (combo.getPrice() * cReq.getQuantity());
             }
         }
 
+        // 🔥 LƯU TRỮ VOUCHER DƯỚI DẠNG MỘT MÓN HÀNG ẢO
         if (request.getVoucherCode() != null && !request.getVoucherCode().trim().isEmpty()) {
             Voucher voucher = voucherService.validateAndGetVoucher(request.getVoucherCode(), showtime.getCinemaItem().getId(), total);
             total = Math.max(0.0, total - voucher.getDiscountValue());
-            voucher.setUsedCount(voucher.getUsedCount() + 1);
-            voucherRepository.save(voucher);
+            
+            OrderDetail dVoucher = new OrderDetail();
+            dVoucher.setOrder(savedOrder);
+            dVoucher.setItemType("VOUCHER");
+            dVoucher.setItemId(voucher.getId());
+            dVoucher.setItemName(voucher.getCode());
+            dVoucher.setQuantity(1);
+            dVoucher.setPrice(0.0); // Không cộng thêm tiền vào đơn
+            details.add(dVoucher);
         }
 
+        // 🎯 FIX CHÍ MẠNG: Lưu lại tổng tiền ĐÃ GIẢM vào savedOrder TRƯỚC khi gọi sinh link VNPay
         savedOrder.setTotalAmount(total);
         orderDetailRepository.saveAll(details);
         savedOrder.setOrderDetails(details);
         
-        OrderResponse response = mapToResponse(orderRepository.save(savedOrder));
+        // Dòng này cực kỳ quan trọng: Ghi đè vào DB và trả ra object mới nhất có chứa giá đã giảm
+        savedOrder = orderRepository.save(savedOrder); 
+        
+        OrderResponse response = mapToResponse(savedOrder);
 
         if ("VNPAY".equalsIgnoreCase(request.getPaymentMethod())) {
+            // Lúc này savedOrder đã ngậm giá đã trừ, ném vào sinh link VNPay là chuẩn 100%
             response.setPaymentUrl(generateVNPayUrl(savedOrder));
         }
 
         return response;
     }
-
     private String generateVNPayUrl(Order order) {
         long amount = (long) (order.getTotalAmount() * 100);
         Map<String, String> vnp_Params = new TreeMap<>();
@@ -269,43 +301,75 @@ public class OrderServiceImpl implements OrderService {
     }
 
     // =========================================================================
-    // 🎯 FIX LỖI: LOGIC CẬP NHẬT TRẠNG THÁI VÉ BẰNG CÁCH GOM DANH SÁCH RỒI LƯU
+    // 🎯 HÀM QUYỀN LỰC: CẬP NHẬT TRẠNG THÁI TỪ VNPAY 
+    // (ĐÃ BỌC LÓT VÉ, HOÀN KHO VÀ XỬ LÝ MÃ GIẢM GIÁ TẬN GỐC)
     // =========================================================================
-    @Override
+  @Override
     @Transactional
     public OrderResponse updateOrderStatus(Long orderId, String newStatus) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Đơn hàng không tồn tại"));
         
         String status = newStatus.toUpperCase();
+        boolean isCancelStatus = "CANCELLED".equals(status) || "FAILED".equals(status);
+        boolean isSuccessStatus = "PAID".equals(status);
+
+        // Chặn luồng nếu đơn đã bị Hủy/Fail từ trước, tránh cộng kho 2 lần
+        if (("CANCELLED".equals(order.getStatus()) || "FAILED".equals(order.getStatus())) && isCancelStatus) {
+            return mapToResponse(order);
+        }
+
         order.setStatus(status);
 
-        // 1. Lấy showtimeId
-        List<Long> showtimeIds = orderRepository.findShowtimeIdByOrderId(order.getId());
-        Long showtimeId = showtimeIds.isEmpty() ? null : showtimeIds.get(0);    
-
-        // 2. Gom toàn bộ Vé cần cập nhật vào 1 danh sách
-        if (order.getOrderDetails() != null && showtimeId != null) {
+        if (order.getOrderDetails() != null) {
             List<Ticket> ticketsToUpdate = new ArrayList<>();
             
             for (OrderDetail d : order.getOrderDetails()) {
+                
+                // 1. 🎯 CẬP NHẬT ĐỒNG BỘ TRẠNG THÁI VÉ (Tìm đích danh vé đang BOOKED của User này)
                 if ("TICKET".equals(d.getItemType())) {
-                    List<Ticket> tickets = ticketRepository.findBySeatIdAndShowtimeId(d.getItemId(), showtimeId);
+                    // Xóa hẳn cái showtimeId đi, dùng ID ghế và ID user để tóm chính xác vé
+                    List<Ticket> tickets = ticketRepository.findBySeatIdAndUserIdAndStatus(
+                            d.getItemId(), 
+                            order.getUser().getUserId(), 
+                            "BOOKED"
+                    );
                     
                     for (Ticket t : tickets) {
-                        // Check đúng User mua vé và vé đó không phải vé đã Hủy
-                        if (t.getUser() != null 
-                            && t.getUser().getUserId().equals(order.getUser().getUserId())
-                            && !"CANCELLED".equalsIgnoreCase(t.getStatus())) {
-                            
-                            t.setStatus(status); // Cập nhật trạng thái
-                            ticketsToUpdate.add(t);
-                        }
+                        t.setStatus(status); // Đổi thành PAID, CANCELLED hoặc FAILED
+                        ticketsToUpdate.add(t);
+                    }
+                }
+                
+                // 2. NẾU BỊ HỦY/THẤT BẠI -> HOÀN LẠI KHO BẮP NƯỚC THEO ĐÚNG RẠP
+                if (isCancelStatus && "COMBO".equals(d.getItemType())) {
+                    Long cinemaItemId = order.getCinemaItem().getId(); 
+                    cinemaComboRepository.findByCinemaItemIdAndComboId(cinemaItemId, d.getItemId())
+                        .ifPresent(cinemaCombo -> {
+                            if (cinemaCombo.getStock() != null) {
+                                cinemaCombo.setStock(cinemaCombo.getStock() + d.getQuantity());
+                                cinemaComboRepository.save(cinemaCombo);
+                            }
+                        });
+                }
+                
+                // 3. NẾU THANH TOÁN THÀNH CÔNG -> CHỐT SỔ VOUCHER CỦA USER
+                if (isSuccessStatus && "VOUCHER".equals(d.getItemType())) {
+                    Voucher voucher = voucherRepository.findById(d.getItemId()).orElse(null);
+                    if (voucher != null) {
+                        // Tăng lượt đã dùng lên (tương đương trừ đi số lượng kho Voucher)
+                        voucher.setUsedCount(voucher.getUsedCount() + 1);
+                        voucherRepository.save(voucher);
+                        
+                        // Xóa vĩnh viễn voucher này khỏi ví của User (bảng user_vouchers)
+                        User orderUser = order.getUser();
+                        orderUser.getVouchers().removeIf(v -> v.getId().equals(voucher.getId()));
+                        userRepository.save(orderUser);
                     }
                 }
             }
             
-            // 🔥 Lưu toàn bộ danh sách vé trong 1 nhịp (Cực kỳ an toàn & Nhanh)
+            // Lưu toàn bộ vé đã đổi trạng thái
             if (!ticketsToUpdate.isEmpty()) {
                 ticketRepository.saveAll(ticketsToUpdate);
             }
@@ -313,7 +377,7 @@ public class OrderServiceImpl implements OrderService {
         
         Order savedOrder = orderRepository.save(order);
         
-        // 3. Cộng điểm thưởng
+        // 4. Cộng điểm thưởng khi thanh toán thành công
         if ("PAID".equals(status)) {
             User user = savedOrder.getUser();
             int earnedPoints = (int) (savedOrder.getTotalAmount() / 10000);
@@ -321,7 +385,7 @@ public class OrderServiceImpl implements OrderService {
             userRepository.save(user);
         }
         
-        // 4. Cập nhật bảng Payment
+        // 5. Cập nhật bảng Payment
         Optional<Payment> paymentOpt = paymentRepository.findByOrderId(savedOrder.getId());
         Payment payment = paymentOpt.orElse(new Payment());
         payment.setOrder(savedOrder);
@@ -330,7 +394,7 @@ public class OrderServiceImpl implements OrderService {
         payment.setPaidAt(LocalDateTime.now());
         paymentRepository.save(payment);
         
-        // 5. Thông báo (Mail/Socket)
+        // 6. Thông báo ngầm (Mail/Socket)
         if ("PAID".equals(status) || "USED".equals(status)) {
             if ("PAID".equals(status)) mailService.sendOrderConfirmation(savedOrder);
 
@@ -349,8 +413,28 @@ public class OrderServiceImpl implements OrderService {
 
         return mapToResponse(savedOrder);
     }
+    // =========================================================================
+    // HỦY ĐƠN THỦ CÔNG (Được gom chung vào updateOrderStatus để tái sử dụng logic)
+    // =========================================================================
+    @Transactional
+    public String cancelOrder(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
 
-  @Override
+        if ("CANCELLED".equalsIgnoreCase(order.getStatus())) {
+            throw new RuntimeException("Đơn hàng này đã được hủy trước đó!");
+        }
+
+        // Gọi thẳng hàm quyền lực ở trên để xử lý mượt mà cả Hủy vé lẫn Hoàn kho bắp nước
+        updateOrderStatus(orderId, "CANCELLED");
+        
+        return "Hủy đơn hàng thành công, đã hoàn trả ghế và bắp nước vào kho!";
+    }
+
+    // =========================================================================
+    // CÁC HÀM GET, SCAN, CHECK-IN GIỮ NGUYÊN (KHÔNG ẢNH HƯỞNG)
+    // =========================================================================
+    @Override
     public OrderResponse scanOrderTicket(String bookingCode) {
         User staff = getCurrentUser();
 
@@ -364,7 +448,6 @@ public class OrderServiceImpl implements OrderService {
 
         Ticket sampleTicket = tickets.get(0);
         
-        // 🔥 KIỂM TRA ĐÚNG RẠP NGAY TẠI ĐÂY (Fail-fast: Sai rạp là chặn luôn)
         if (isSuperAdmin(staff)) {
             throw new RuntimeException("Tài khoản Super Admin không có quyền soát vé trực tiếp tại quầy!");
         }
@@ -378,7 +461,6 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Xâm nhập sai chi nhánh! Vé này được mua tại cụm rạp '" + sampleTicket.getShowtime().getCinemaItem().getName() + "', không thể soát tại đây.");
         }
 
-        // Tiếp tục xử lý nếu đúng rạp
         Seat seat = sampleTicket.getSeat();
         if (seat == null) {
             throw new RuntimeException("Dữ liệu vật lý ghế ngồi đính kèm mã đặt vé bị lỗi!");
@@ -422,6 +504,7 @@ public class OrderServiceImpl implements OrderService {
 
         return mapToResponse(order);
     }
+    
     @Override
     @Transactional
     public OrderResponse confirmCheckIn(Long orderId) {
@@ -576,10 +659,12 @@ public class OrderServiceImpl implements OrderService {
                 } else {
                     name = "Vé Xem Phim";
                 }
-            } else {
+            } else if ("COMBO".equals(d.getItemType())) {
                 name = comboRepository.findById(d.getItemId())
                         .map(Combo::getName)
                         .orElse("Combo Bắp Nước");
+            } else if ("VOUCHER".equals(d.getItemType())) {
+                name = "Voucher Giảm Giá (" + d.getItemName() + ")";
             }
 
             return OrderDetailResponse.builder()

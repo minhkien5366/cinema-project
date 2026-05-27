@@ -13,7 +13,7 @@ public interface CinemaComboRepository
     findByCinemaItemIdAndComboId(Long cinemaItemId, Long comboId);
 
     List<CinemaCombo> findByCinemaItemId(Long cinemaItemId);
-
+            
     List<CinemaCombo>
     findByCinemaItemIdAndActiveFalse(Long cinemaItemId);
     

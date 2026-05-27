@@ -66,4 +66,10 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
 
     @Query("SELECT t.seat FROM Ticket t WHERE t.showtime.id = :showtimeId AND t.status IN ('BOOKED', 'PAID')")
     List<Seat> findOccupiedSeatsByShowtimeId(@Param("showtimeId") Long showtimeId);
+
+    // =========================================================================
+    // 🎯 HÀM FIX LỖI MỚI NHẤT: BẮT SỐNG VÉ ĐỂ ĐỔI TRẠNG THÁI (TRÁNH LỖI KẸT BOOKED)
+    // =========================================================================
+    @Query("SELECT t FROM Ticket t WHERE t.seat.id = :seatId AND t.user.userId = :userId AND t.status = :status")
+    List<Ticket> findBySeatIdAndUserIdAndStatus(@Param("seatId") Long seatId, @Param("userId") Long userId, @Param("status") String status);
 }

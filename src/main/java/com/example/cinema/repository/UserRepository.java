@@ -16,6 +16,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // Tìm kiếm theo số điện thoại
     Optional<User> findByMobileNumber(String mobileNumber);
+    boolean existsByMobileNumber(String mobileNumber);
 
     // Tìm kiếm nâng cao: Theo Tên, Email hoặc Số điện thoại (Hỗ trợ phân trang)
     @Query("SELECT u FROM User u WHERE " +
