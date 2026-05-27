@@ -20,7 +20,7 @@ public class OrderTimeoutScheduler {
     private final OrderRepository orderRepository;
     private final OrderService orderService;
 
-    @Scheduled(cron = "0 */1 * * * *")
+    @Scheduled(cron = "0 */10 * * * *")
     @Transactional
     public void checkAndCancelExpiredOrders() {
         log.info("⏰ Bắt đầu quét ngầm hệ thống tìm đơn hàng quá hạn...");
