@@ -85,14 +85,14 @@ public class VoucherController {
         }
 
         @GetMapping
-        @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
         public ResponseEntity<ApiResponse<List<Voucher>>> getAll() {
                 return ResponseEntity.ok(ApiResponse.<List<Voucher>>builder()
                         .status(200).data(voucherService.getAllVouchers()).build());
         }
 
         @PostMapping
-        @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
         public ResponseEntity<ApiResponse<Voucher>> create(
                 @Valid @RequestBody VoucherRequest request) {
 
@@ -103,7 +103,7 @@ public class VoucherController {
         }
 
         @PutMapping("/{id}")
-        @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+        @PreAuthorize("hasRole('SUPER_ADMIN')")
         public ResponseEntity<ApiResponse<Voucher>> update(
                 @PathVariable Long id,
                 @Valid @RequestBody VoucherRequest request) {
@@ -115,14 +115,14 @@ public class VoucherController {
         }
 
         @DeleteMapping("/{id}")
-        @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+        @PreAuthorize("hasRole('SUPER_ADMIN')")
         public ResponseEntity<ApiResponse<String>> delete(@PathVariable Long id) {
                 voucherService.deleteVoucher(id);
                 return ResponseEntity.ok(ApiResponse.<String>builder().status(200).build());
         }
 
         @PostMapping("/reward-points")
-        @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+        @PreAuthorize("hasRole('SUPER_ADMIN')")
         public ResponseEntity<ApiResponse<String>> rewardPoints(@RequestBody PointsRewardRequest request) {
                 voucherService.rewardPointsToUser(request);
                 return ResponseEntity.ok(ApiResponse.<String>builder()

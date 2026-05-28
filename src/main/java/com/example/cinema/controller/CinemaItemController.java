@@ -99,7 +99,7 @@ public class CinemaItemController {
     // ================= CREATE =================
     @PostMapping
     @PreAuthorize(
-            "hasAnyRole('ADMIN', 'SUPER_ADMIN')"
+            "hasRole('SUPER_ADMIN')"
     )
     public ResponseEntity<ApiResponse<CinemaItem>> create(
 
@@ -126,7 +126,7 @@ public class CinemaItemController {
     // ================= UPDATE =================
     @PutMapping("/{id}")
     @PreAuthorize(
-            "hasAnyRole('ADMIN', 'SUPER_ADMIN')"
+            "hasRole('SUPER_ADMIN')"
     )
     public ResponseEntity<ApiResponse<CinemaItem>> update(
 
@@ -158,7 +158,7 @@ public class CinemaItemController {
     // ================= DELETE =================
     @DeleteMapping("/{id}")
     @PreAuthorize(
-            "hasAnyRole('ADMIN', 'SUPER_ADMIN')"
+            "hasRole('SUPER_ADMIN')"
     )
     public ResponseEntity<ApiResponse<Void>> delete(
             @PathVariable Long id

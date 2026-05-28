@@ -48,7 +48,7 @@ public class RoomController {
                         .build()
         );
     }
-
+    
     // ================= GET BY CINEMA ITEM =================
     @GetMapping("/cinema-item/{cinemaItemId}")
     public ResponseEntity<ApiResponse<List<Room>>> getRoomsByCinemaItem(
@@ -66,7 +66,7 @@ public class RoomController {
 
     // ================= CREATE =================
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<Room>> createRoom(
             @Valid @RequestBody RoomRequest request
     ) {
@@ -84,7 +84,7 @@ public class RoomController {
 
     // ================= UPDATE =================
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<Room>> updateRoom(
             @PathVariable Long id,
             @Valid @RequestBody RoomRequest request
@@ -103,7 +103,7 @@ public class RoomController {
 
     // ================= DELETE =================
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<String>> deleteRoom(
             @PathVariable Long id
     ) {
@@ -118,4 +118,5 @@ public class RoomController {
                         .build()
         );
     }
+    
 }

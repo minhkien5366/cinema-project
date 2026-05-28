@@ -42,7 +42,7 @@ public class PromotionController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Promotion>> create(
             @Valid @ModelAttribute PromotionRequest request,
             @RequestParam(value = "file", required = false) MultipartFile file) { // Dùng @RequestParam cho file
@@ -52,7 +52,7 @@ public class PromotionController {
     }
 
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Promotion>> update(
             @PathVariable Long id,
             @Valid @ModelAttribute PromotionRequest request,
@@ -63,7 +63,7 @@ public class PromotionController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<String>> delete(@PathVariable Long id) {
         promotionService.deletePromotion(id);
         return ResponseEntity.ok(ApiResponse.<String>builder()

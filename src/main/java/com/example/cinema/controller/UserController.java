@@ -57,7 +57,7 @@ public class UserController {
 
     // [ADMIN & SUPER ADMIN]: Tìm kiếm và quản lý danh sách người dùng
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Page<UserResponse>>> searchUsers(
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,

@@ -8,6 +8,7 @@ import com.example.cinema.service.ReviewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -59,12 +60,18 @@ public class ReviewController {
                 .build());
     }
 
-    @DeleteMapping("/{reviewId}")
-    public ResponseEntity<ApiResponse<String>> deleteReview(@PathVariable Long reviewId) {
-        reviewService.deleteReview(reviewId);
-        return ResponseEntity.ok(ApiResponse.<String>builder()
-                .status(200)
-                .message("Đã xóa đánh giá thành công!")
-                .build());
-    }
+ @DeleteMapping("/{reviewId}")
+@PreAuthorize("hasRole('SUPER_ADMIN')")
+public ResponseEntity<ApiResponse<String>> deleteReview(
+        @PathVariable Long reviewId
+) {
+    reviewService.deleteReview(reviewId);
+
+    return ResponseEntity.ok(
+            ApiResponse.<String>builder()
+                    .status(200)
+                    .message("Đã xóa đánh giá thành công!")
+                    .build()
+    );
+}
 }

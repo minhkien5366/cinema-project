@@ -115,7 +115,7 @@ public class OrderController {
 
     // ================= 🔥 ENDPOINT 1: XỬ LÝ KIỂM TRA MÃ QR TOÀN DIỆN (CHẤP CẢ VỎ CỦA FE CŨ LẪN MỚI) =================
     @GetMapping("/scan")
-    // @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Tạm khóa để ông test local mượt mà không dính 403
+    @PreAuthorize("hasRole('ADMIN')") 
     public ResponseEntity<ApiResponse<OrderResponse>> scanQrCode(
             @RequestParam(value = "bookingCode", required = false) String bookingCode,
             @RequestParam(value = "qrContent", required = false) String qrContent) {
@@ -164,7 +164,7 @@ public class OrderController {
 
     // ================= 🔥 ENDPOINT 2: XÁC NHẬN SỬ DỤNG VÉ (ĐỔI SANG TRẠNG THÁI USED) =================
     @PutMapping("/{id}/confirm-checkin")
-    // @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')") // Tạm khóa để thuận tiện test luồng local
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<OrderResponse>> confirmCheckIn(@PathVariable Long id) {
         try {
             // Chuyển trạng thái Order + Tickets sang trạng thái USED

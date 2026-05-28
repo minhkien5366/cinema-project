@@ -130,19 +130,18 @@ public class ReviewServiceImpl implements ReviewService {
 
         User currentUser = getCurrentUser();
 
-        // ⭐ CHECK ADMIN
-        boolean isAdmin = currentUser.getRoles().stream()
-                .anyMatch(r ->
-                        r.getRoleName().equalsIgnoreCase("ADMIN")
-                                || r.getRoleName().equalsIgnoreCase("SUPER_ADMIN")
-                );
+        // 🎯 FIX LỖI & THẮT CHẶT QUYỀN: Chỉ chấp nhận tài khoản có role chứa từ khóa "SUPER_ADMIN"
+        boolean isSuperAdmin = currentUser.getRoles().stream()
+                .anyMatch(r -> r.getRoleName().toUpperCase().contains("SUPER_ADMIN"));
 
-        // ⭐ CHECK OWNER
-        boolean isOwner =
-                review.getUser().getUserId()
-                        .equals(currentUser.getUserId());
+        // ⭐ KIỂM TRA QUYỀN SỞ HỮU (Chính chủ người dùng vẫn có quyền tự xóa bài của họ)
+        boolean isOwner = false;
+        if (review.getUser() != null && review.getUser().getUserId() != null) {
+            isOwner = review.getUser().getUserId().equals(currentUser.getUserId());
+        }
 
-        if (!isAdmin && !isOwner) {
+        // Nếu không phải Super Admin và cũng không phải chính chủ -> Chặn lại
+        if (!isSuperAdmin && !isOwner) {
             throw new RuntimeException(
                     "Bạn không có quyền xóa đánh giá này!"
             );

@@ -60,7 +60,7 @@ public class SeatController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<Seat>> createSeat(@RequestBody SeatRequest request) {
         return ResponseEntity.ok(ApiResponse.<Seat>builder()
                 .status(201)
@@ -70,7 +70,7 @@ public class SeatController {
     }
 
     @PostMapping("/generate")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<List<Seat>>> generateSeats(
             @RequestParam Long roomId,
             @RequestParam int rows,
@@ -83,7 +83,7 @@ public class SeatController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<Seat>> updateSeat(@PathVariable Long id, @RequestBody SeatRequest request) {
         return ResponseEntity.ok(ApiResponse.<Seat>builder()
                 .status(200)
@@ -93,7 +93,7 @@ public class SeatController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<String>> deleteSeat(@PathVariable Long id) {
         seatService.deleteSeat(id);
         return ResponseEntity.ok(ApiResponse.<String>builder()
@@ -103,7 +103,7 @@ public class SeatController {
     }
 
     @DeleteMapping("/room/{roomId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<String>> deleteSeatsByRoom(@PathVariable Long roomId) {
         seatService.deleteSeatsByRoom(roomId);
         return ResponseEntity.ok(ApiResponse.<String>builder()

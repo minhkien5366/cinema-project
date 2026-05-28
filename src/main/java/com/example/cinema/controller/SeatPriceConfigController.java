@@ -23,7 +23,7 @@ public class SeatPriceConfigController {
      * Lấy danh sách cấu hình giá
      */
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<List<SeatPriceConfig>>> getAll() {
 
         return ResponseEntity.ok(
@@ -39,7 +39,7 @@ public class SeatPriceConfigController {
      * Thêm cấu hình giá
      */
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<SeatPriceConfig>> create(
             @Valid @RequestBody SeatPriceConfigRequest request
     ) {
@@ -57,7 +57,7 @@ public class SeatPriceConfigController {
      * Cập nhật cấu hình giá
      */
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<SeatPriceConfig>> update(
             @PathVariable Long id,
             @Valid @RequestBody SeatPriceConfigRequest request
@@ -76,7 +76,7 @@ public class SeatPriceConfigController {
      * Xoá cấu hình giá
      */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Void>> delete(
             @PathVariable Long id
     ) {

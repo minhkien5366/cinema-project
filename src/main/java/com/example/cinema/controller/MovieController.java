@@ -61,7 +61,7 @@ public class MovieController {
 
     // 3. Thêm phim mới kèm Upload ảnh (Admin/Super Admin)
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Movie>> createMovie(
             @RequestPart("movie") MovieRequest request,
             @RequestPart(value = "file", required = false) MultipartFile file
@@ -78,7 +78,7 @@ public class MovieController {
 
     // 4. Cập nhật phim kèm đổi ảnh (Admin/Super Admin)
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Movie>> updateMovie(
             @PathVariable Long id,
             @RequestPart("movie") MovieRequest request,
@@ -96,7 +96,7 @@ public class MovieController {
 
     // 5. Xóa phim (Admin/Super Admin)
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<String>> deleteMovie(@PathVariable Long id) {
         movieService.deleteMovie(id);
         return ResponseEntity.ok(

@@ -35,7 +35,7 @@ public class BannerController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Banner>> createBanner(
             @Valid @RequestPart("banner") BannerRequest request, 
             @RequestPart(value = "file", required = false) MultipartFile file) {
@@ -45,7 +45,7 @@ public class BannerController {
     }
 
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Banner>> updateBanner(
             @PathVariable Long id,
             @Valid @RequestPart("banner") BannerRequest request, 
@@ -56,7 +56,7 @@ public class BannerController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<String>> deleteBanner(@PathVariable Long id) {
         bannerService.deleteBanner(id);
         return ResponseEntity.ok(ApiResponse.<String>builder()

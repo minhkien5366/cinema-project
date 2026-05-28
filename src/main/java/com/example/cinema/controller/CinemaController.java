@@ -37,9 +37,9 @@ public class CinemaController {
                 .build());
     }
 
-    // 3. Tạo cụm rạp mới (Chỉ Admin/Super Admin)
+    // 3. Tạo cụm rạp mới (Chỉ Super Admin)
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Cinema>> create(@RequestBody CinemaRequest request) {
         return ResponseEntity.status(201).body(ApiResponse.<Cinema>builder()
                 .status(201)
@@ -48,9 +48,9 @@ public class CinemaController {
                 .build());
     }
 
-    // 4. Cập nhật cụm rạp (Chỉ Admin/Super Admin)
+    // 4. Cập nhật cụm rạp (Chỉ Super Admin)
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Cinema>> update(@PathVariable Long id, @RequestBody CinemaRequest request) {
         return ResponseEntity.ok(ApiResponse.<Cinema>builder()
                 .status(200)
@@ -59,9 +59,9 @@ public class CinemaController {
                 .build());
     }
 
-    // 5. Xóa cụm rạp (Chỉ Admin/Super Admin)
+    // 5. Xóa cụm rạp (Chỉ Super Admin)
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
         cinemaService.deleteCinema(id);
         return ResponseEntity.ok(ApiResponse.<Void>builder()

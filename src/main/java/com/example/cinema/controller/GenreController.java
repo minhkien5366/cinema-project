@@ -40,7 +40,7 @@ public class GenreController {
 
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Genre>> create(
             @Valid @RequestBody GenreRequest request) {
         return ResponseEntity.ok(ApiResponse.<Genre>builder()
@@ -51,7 +51,7 @@ public class GenreController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Genre>> update(
             @PathVariable Integer id,
             @Valid @RequestBody GenreRequest request) {
@@ -63,7 +63,7 @@ public class GenreController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
         public ResponseEntity<ApiResponse<String>> delete(@PathVariable Integer id) {
             genreService.deleteGenre(id);
             return ResponseEntity.ok(ApiResponse.<String>builder()

@@ -51,7 +51,7 @@ public class TicketController {
     // --- API DÀNH CHO ADMIN ---
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<List<Ticket>>> getAllTickets() {
         return ResponseEntity.ok(ApiResponse.<List<Ticket>>builder()
                 .status(200)
@@ -61,7 +61,7 @@ public class TicketController {
     }
 
     @GetMapping("/showtime/{showtimeId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<List<Ticket>>> getTicketsByShowtime(@PathVariable Long showtimeId) {
         return ResponseEntity.ok(ApiResponse.<List<Ticket>>builder()
                 .status(200)
@@ -71,7 +71,7 @@ public class TicketController {
     }
 
     @PutMapping("/{id}/cancel")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<ApiResponse<Void>> cancelTicket(@PathVariable Long id) {
         ticketService.cancelTicket(id);
         return ResponseEntity.ok(ApiResponse.<Void>builder()

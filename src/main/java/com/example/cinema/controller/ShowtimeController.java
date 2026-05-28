@@ -54,7 +54,7 @@ public class ShowtimeController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Showtime>> create(@RequestBody ShowtimeRequest request) {
         return ResponseEntity.status(201).body(ApiResponse.<Showtime>builder()
                 .status(201).message("Đã tạo suất chiếu").data(showtimeService.createShowtime(request)).build());
@@ -68,14 +68,14 @@ public class ShowtimeController {
         }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Showtime>> update(@PathVariable Long id, @RequestBody ShowtimeRequest request) {
         return ResponseEntity.ok(ApiResponse.<Showtime>builder()
                 .status(200).message("Cập nhật thành công").data(showtimeService.updateShowtime(id, request)).build());
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<String>> delete(@PathVariable Long id) {
         showtimeService.deleteShowtime(id);
         return ResponseEntity.ok(ApiResponse.<String>builder()

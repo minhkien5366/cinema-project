@@ -63,6 +63,10 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/banners/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/combos/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/showtimes/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/reviews/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/promotions/**").permitAll()
+
+
                 .requestMatchers("/api/v1/posts/**").permitAll()
                 // Trong file SecurityConfig.java, thêm dòng dưới đây:
                 .requestMatchers(HttpMethod.GET, "/api/v1/seats/**").permitAll()
