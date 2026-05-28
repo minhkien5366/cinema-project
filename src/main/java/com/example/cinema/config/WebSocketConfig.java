@@ -9,8 +9,10 @@ import org.springframework.web.socket.config.annotation.*;
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // Cho phép Frontend kết nối vào qua SockJS
-        registry.addEndpoint("/ws").setAllowedOrigins("http://localhost:3000").withSockJS();
+        // Cập nhật cả 2 origin để tránh lỗi CORS khi deploy
+        registry.addEndpoint("/ws")
+                .setAllowedOrigins("http://localhost:3000", "https://akcinema.vercel.app")
+                .withSockJS();
     }
 
     @Override
