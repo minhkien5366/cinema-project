@@ -17,4 +17,8 @@ public interface ReviewService {
 
     // Lấy danh sách đánh giá theo ID phim
     List<Review> getReviewsByMovie(Long movieId);
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 4b52a2b0b676e1799219e1c914b51829759effe3
