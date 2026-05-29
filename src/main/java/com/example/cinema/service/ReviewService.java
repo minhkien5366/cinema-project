@@ -6,23 +6,15 @@ import java.util.List;
 
 public interface ReviewService {
     
-    /**
-     * Tạo đánh giá mới kèm các ràng buộc:
-     * 1. Phải đăng nhập
-     * 2. Phải mua vé (PAID)
-     * 3. Phải xem xong phim (EndTime < Now)
-     * 4. Thang điểm 1-5, nội dung > 10 ký tự
-     */
+   // Tạo đánh giá mới
     Review createReview(ReviewRequest request);
 
-    /**
-     * Lấy danh sách đánh giá của một bộ phim (Mới nhất lên đầu)
-     */
-    List<Review> getReviewsByMovie(Long movieId);
+    // 🎯 THÊM MỚI: Cập nhật (Sửa) đánh giá
+    Review updateReview(Long reviewId, ReviewRequest request);
 
-    /**
-     * --- FIX LỖI @Override ---
-     * Xóa đánh giá (Dành cho Admin hoặc chính chủ)
-     */
+    // Xóa đánh giá (Dành cho Owner và Super Admin)
     void deleteReview(Long reviewId);
+
+    // Lấy danh sách đánh giá theo ID phim
+    List<Review> getReviewsByMovie(Long movieId);
 }
