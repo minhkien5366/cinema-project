@@ -12,6 +12,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -30,6 +31,43 @@ public class SeatServiceImpl implements SeatService {
     private static final double PRICE_NORMAL = 80000.0;
     private static final double PRICE_VIP = 120000.0;
     private static final double PRICE_SWEETBOX = 250000.0;
+
+    // ================= LOGIC KIỂM TRA SUẤT CHIẾU TƯƠNG LAI =================
+    /**
+     * Kiểm tra xem phòng có suất chiếu nào ĐANG DIỄN RA hoặc SẮP DIỄN RA không.
+     * Nếu các suất chiếu đã kết thúc (dù chỉ 1 phút trước) -> trả về false (Cho phép xóa/sửa)
+     */
+    private boolean hasActiveOrFutureShowtimes(Long roomId) {
+        List<Showtime> showtimes = showtimeRepository.findByRoomId(roomId);
+        if (showtimes == null || showtimes.isEmpty()) {
+            return false;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        for (Showtime st : showtimes) {
+            if (st.getStartTime() == null) continue;
+
+            // Mặc định thời lượng phim là 150 phút (2.5 tiếng) nếu không lấy được dữ liệu thời lượng
+            int durationMinutes = 150; 
+            try {
+                if (st.getMovie() != null && st.getMovie().getDuration() != null) {
+                    durationMinutes = st.getMovie().getDuration();
+                }
+            } catch (Exception e) {
+                // Bỏ qua lỗi, dùng giá trị mặc định 150 phút
+            }
+
+            // Thời điểm kết thúc suất chiếu = Thời gian bắt đầu + thời lượng phim
+            LocalDateTime endTime = st.getStartTime().plusMinutes(durationMinutes);
+
+            // Nếu thời điểm hiện tại VẪN TRƯỚC thời điểm kết thúc => Suất chiếu đang hoặc sắp diễn ra
+            if (now.isBefore(endTime)) {
+                return true; 
+            }
+        }
+        return false; // Tất cả suất chiếu đều đã diễn ra xong trong quá khứ
+    }
 
     // ================= SHOWTIME & AVAILABILITY =================
     @Override
@@ -235,11 +273,10 @@ public class SeatServiceImpl implements SeatService {
 
         validateRoomAccess(roomId);
 
-        // CHECK SUẤT CHIẾU
-        if (showtimeRepository.existsByRoomId(roomId)) {
-
+        // Đã thay đổi logic: Chỉ chặn khi có suất chiếu ĐANG hoặc SẮP diễn ra
+        if (hasActiveOrFutureShowtimes(roomId)) {
             throw new RuntimeException(
-                    "Phòng đã có suất chiếu, không thể chỉnh sửa sơ đồ ghế!"
+                    "Phòng đang có suất chiếu hoạt động hoặc sắp diễn ra, không thể chỉnh sửa sơ đồ ghế!"
             );
         }
 
@@ -292,10 +329,10 @@ public class SeatServiceImpl implements SeatService {
 
         validateRoomAccess(request.getRoomId());
 
-        if (showtimeRepository.existsByRoomId(request.getRoomId())) {
-
+        // Đã thay đổi logic
+        if (hasActiveOrFutureShowtimes(request.getRoomId())) {
             throw new RuntimeException(
-                    "Phòng đã có suất chiếu, không thể thêm ghế!"
+                    "Phòng đang có suất chiếu hoạt động hoặc sắp diễn ra, không thể thêm ghế!"
             );
         }
 
@@ -362,12 +399,10 @@ public class SeatServiceImpl implements SeatService {
 
         validateRoomAccess(seat.getRoom().getId());
 
-        if (showtimeRepository.existsByRoomId(
-                seat.getRoom().getId()
-        )) {
-
+        // Đã thay đổi logic
+        if (hasActiveOrFutureShowtimes(seat.getRoom().getId())) {
             throw new RuntimeException(
-                    "Phòng đã có suất chiếu, không thể cập nhật ghế!"
+                    "Phòng đang có suất chiếu hoạt động hoặc sắp diễn ra, không thể cập nhật ghế!"
             );
         }
 
@@ -471,12 +506,10 @@ public class SeatServiceImpl implements SeatService {
 
         validateRoomAccess(seat.getRoom().getId());
 
-        if (showtimeRepository.existsByRoomId(
-                seat.getRoom().getId()
-        )) {
-
+        // Đã thay đổi logic
+        if (hasActiveOrFutureShowtimes(seat.getRoom().getId())) {
             throw new RuntimeException(
-                    "Phòng đã có suất chiếu, không thể xóa ghế!"
+                    "Phòng đang có suất chiếu hoạt động hoặc sắp diễn ra, không thể xóa ghế!"
             );
         }
 
@@ -512,10 +545,10 @@ public class SeatServiceImpl implements SeatService {
 
         validateRoomAccess(roomId);
 
-        if (showtimeRepository.existsByRoomId(roomId)) {
-
+        // Đã thay đổi logic
+        if (hasActiveOrFutureShowtimes(roomId)) {
             throw new RuntimeException(
-                    "Phòng đã có suất chiếu, không thể xóa toàn bộ ghế!"
+                    "Phòng đang có suất chiếu hoạt động hoặc sắp diễn ra, không thể xóa toàn bộ ghế!"
             );
         }
 
@@ -530,21 +563,15 @@ public class SeatServiceImpl implements SeatService {
         boolean canDelete = true;
 
         if (seat != null && seat.getRoom() != null) {
-
-            if (showtimeRepository.existsByRoomId(
-                    seat.getRoom().getId()
-            )) {
-
+            // Đã thay đổi logic, truyền trạng thái chuẩn về cho Frontend
+            if (hasActiveOrFutureShowtimes(seat.getRoom().getId())) {
                 canDelete = false;
             }
-
         } else {
-
             canDelete = false;
         }
 
         Map<String, Boolean> response = new HashMap<>();
-
         response.put("canDelete", canDelete);
 
         return response;
