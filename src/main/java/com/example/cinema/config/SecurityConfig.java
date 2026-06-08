@@ -47,6 +47,10 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults()) 
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                
+                // 🔥 ĐÃ THÊM: Cho phép Cronjob gọi vào API ping để đánh thức Server mà không cần Token
+                .requestMatchers("/api/ping").permitAll()
+                
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 .requestMatchers("/api/v1/auth/**").permitAll()
 
@@ -65,7 +69,6 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/showtimes/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/reviews/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/promotions/**").permitAll()
-
 
                 .requestMatchers("/api/v1/posts/**").permitAll()
                 // Trong file SecurityConfig.java, thêm dòng dưới đây:
