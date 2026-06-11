@@ -1,5 +1,6 @@
 package com.example.cinema.controller;
 
+import com.example.cinema.dto.MovieRevenueDTO;
 import com.example.cinema.service.FinanceService;
 import com.example.cinema.service.ReportService;
 import com.example.cinema.service.impl.ReviewServiceImpl;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
@@ -101,6 +103,22 @@ public class ReportController {
 
         return ResponseEntity.ok(
                 reportService.getBestSellingCombos(cinemaId, start, end)
+        );
+    }
+
+    @GetMapping("/movie-revenue")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getMovieRevenue(
+            @RequestParam
+            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+            LocalDateTime startDate,
+
+            @RequestParam
+            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+            LocalDateTime endDate) {
+
+        return ResponseEntity.ok(
+                reportService.getMovieRevenue(startDate, endDate)
         );
     }
 }

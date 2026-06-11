@@ -72,4 +72,22 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     // =========================================================================
     @Query("SELECT t FROM Ticket t WHERE t.seat.id = :seatId AND t.user.userId = :userId AND t.status = :status")
     List<Ticket> findBySeatIdAndUserIdAndStatus(@Param("seatId") Long seatId, @Param("userId") Long userId, @Param("status") String status);
+
+    @Query(value = """
+        SELECT
+            m.title AS movieName,
+            SUM(t.price) AS revenue
+        FROM tickets t
+        JOIN showtimes s ON t.showtime_id = s.id
+        JOIN movies m ON s.movie_id = m.id
+        WHERE t.status = 'PAID'
+        AND t.created_at BETWEEN :startDate AND :endDate
+        GROUP BY m.title
+        ORDER BY revenue DESC
+        """, nativeQuery = true)
+    List<Object[]> getMovieRevenue(
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate);
+
+            
 }

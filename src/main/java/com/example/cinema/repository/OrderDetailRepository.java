@@ -13,6 +13,7 @@ public interface OrderDetailRepository extends JpaRepository<OrderDetail, Long> 
 
     List<OrderDetail> findByOrderId(Long orderId);
 
+    // 1. DÀNH CHO ADMIN: Lọc chính xác theo CinemaId
     @Query("""
         SELECT new com.example.cinema.dto.ComboReportResponse(
             od.itemId,
@@ -24,7 +25,7 @@ public interface OrderDetailRepository extends JpaRepository<OrderDetail, Long> 
         JOIN od.order o
         WHERE od.itemType = 'COMBO'
         AND o.status = 'PAID'
-        AND (:cinemaId IS NULL OR o.cinemaItem.id = :cinemaId)
+        AND o.cinemaItem.id = :cinemaId
         AND o.createdAt BETWEEN :start AND :end
         GROUP BY od.itemId, od.itemName
         ORDER BY SUM(od.quantity) DESC
@@ -34,5 +35,27 @@ public interface OrderDetailRepository extends JpaRepository<OrderDetail, Long> 
             @Param("start") LocalDateTime start,
             @Param("end") LocalDateTime end
     );
+
+    // 2. DÀNH CHO SUPER-ADMIN: Lấy tổng toàn bộ các rạp hệ thống (Bỏ o.cinemaItem.id)
+    @Query("""
+        SELECT new com.example.cinema.dto.ComboReportResponse(
+            od.itemId,
+            od.itemName,
+            SUM(od.quantity),
+            SUM(od.quantity * od.price)
+        )
+        FROM OrderDetail od
+        JOIN od.order o
+        WHERE od.itemType = 'COMBO'
+        AND o.status = 'PAID'
+        AND o.createdAt BETWEEN :start AND :end
+        GROUP BY od.itemId, od.itemName
+        ORDER BY SUM(od.quantity) DESC
+    """)
+    List<ComboReportResponse> getAllBestSellingCombos(
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end
+    );
+    
     List<OrderDetail> findByItemTypeAndItemId(String itemType, Long itemId);
 }

@@ -9,6 +9,7 @@ import java.util.Map;
 import com.example.cinema.dto.AdminDashboardDTO;
 import com.example.cinema.dto.ComboReportResponse;
 import com.example.cinema.dto.MovieRatingDTO;
+import com.example.cinema.dto.MovieRevenueDTO;
 import com.example.cinema.dto.RevenueChartDTO;
 public interface ReportService {
     ByteArrayInputStream exportRevenueReport(Long cinemaId, LocalDateTime start, LocalDateTime end) throws IOException;
@@ -17,4 +18,7 @@ public interface ReportService {
     AdminDashboardDTO getAdminDashboard(Long cinemaId);
     List<RevenueChartDTO> getAdminRevenue7Days(Long cinemaId);
     List<ComboReportResponse> getBestSellingCombos(Long cinemaId, LocalDateTime start, LocalDateTime end);
+    List<MovieRevenueDTO> getMovieRevenue(
+        LocalDateTime startDate,
+        LocalDateTime endDate);
 }

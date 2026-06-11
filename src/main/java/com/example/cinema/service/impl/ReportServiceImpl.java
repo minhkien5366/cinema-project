@@ -3,9 +3,11 @@ package com.example.cinema.service.impl;
 import com.example.cinema.dto.AdminDashboardDTO;
 import com.example.cinema.dto.ComboReportResponse;
 import com.example.cinema.dto.MovieRatingDTO;
+import com.example.cinema.dto.MovieRevenueDTO;
 import com.example.cinema.dto.RevenueChartDTO;
 import com.example.cinema.entity.Order;
 import com.example.cinema.repository.ShowtimeRepository;
+import com.example.cinema.repository.TicketRepository;
 import com.example.cinema.repository.OrderRepository;
 import com.example.cinema.repository.ReviewRepository;
 import com.example.cinema.service.ReportService;
@@ -38,99 +40,123 @@ public class ReportServiceImpl implements ReportService {
     @Autowired
     private OrderDetailRepository orderDetailRepository;
 
+    @Autowired
+    private TicketRepository ticketRepository;
+
     private static final double VAT_RATE = 0.10;
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+    private static final String FONT_FAMILY = "Times New Roman";
+    private static final short FONT_SIZE = 13;
 
+    @Override
+    public ByteArrayInputStream exportRevenueReport(
+            Long cinemaId,
+            LocalDateTime start,
+            LocalDateTime end
+    ) throws IOException {
 
-        @Override
-        public ByteArrayInputStream exportRevenueReport(
-                Long cinemaId,
-                LocalDateTime start,
-                LocalDateTime end
-        ) throws IOException {
-
+        // 1. Phân luồng lấy danh sách hóa đơn theo quyền Admin / Super-Admin
         List<Order> orders;
-
         if (cinemaId != null && cinemaId > 0) {
-
-                orders = orderRepository
-                        .findByCinemaItemIdAndCreatedAtBetweenAndStatus(
-                                cinemaId,
-                                start,
-                                end,
-                                "PAID"
-                        );
-
+            orders = orderRepository.findByCinemaItemIdAndCreatedAtBetweenAndStatus(cinemaId, start, end, "PAID");
         } else {
-
-                orders = orderRepository
-                        .findByCreatedAtBetweenAndStatus(
-                                start,
-                                end,
-                                "PAID"
-                        );
+            orders = orderRepository.findByCreatedAtBetweenAndStatus(start, end, "PAID");
         }
+        if (orders == null) orders = new ArrayList<>();
+
+        // 2. Gọi dữ liệu cho các sheet phụ (Đã sửa hàm combo ở dưới để chạy được cho cả Super-Admin)
+        List<MovieRevenueDTO> movies = getMovieRevenue(start, end);
+        if (movies == null) movies = new ArrayList<>();
+
+        List<ComboReportResponse> combos = getBestSellingCombos(cinemaId, start, end);
+        if (combos == null) combos = new ArrayList<>();
 
         try (
                 Workbook workbook = new XSSFWorkbook();
                 ByteArrayOutputStream out = new ByteArrayOutputStream()
         ) {
+            // --- KHỞI TẠO ĐỊNH DẠNG FONT & STYLE (TIMES NEW ROMAN - 13PX) ---
+            Font baseFont = workbook.createFont();
+            baseFont.setFontName(FONT_FAMILY);
+            baseFont.setFontHeightInPoints(FONT_SIZE);
 
-                Sheet sheet = workbook.createSheet("Bao Cao Doanh Thu");
+            Font headerFont = workbook.createFont();
+            headerFont.setFontName(FONT_FAMILY);
+            headerFont.setFontHeightInPoints(FONT_SIZE);
+            headerFont.setBold(true);
+            headerFont.setColor(IndexedColors.WHITE.getIndex());
 
-                Font headerFont = workbook.createFont();
-                headerFont.setBold(true);
+            Font boldFont = workbook.createFont();
+            boldFont.setFontName(FONT_FAMILY);
+            boldFont.setFontHeightInPoints(FONT_SIZE);
+            boldFont.setBold(true);
 
-                CellStyle headerStyle = workbook.createCellStyle();
-                headerStyle.setFont(headerFont);
+            // Style tiêu đề chung
+            CellStyle headerStyle = workbook.createCellStyle();
+            headerStyle.setFont(headerFont);
+            headerStyle.setFillForegroundColor(IndexedColors.ORANGE.getIndex()); // Nền cam pastel nhẹ
+            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+            setBorders(headerStyle);
 
-                DataFormat format = workbook.createDataFormat();
+            DataFormat format = workbook.createDataFormat();
 
-                CellStyle moneyStyle = workbook.createCellStyle();
-                moneyStyle.setDataFormat(
-                        format.getFormat("#,##0")
-                );
+            // Style dữ liệu dạng tiền tệ
+            CellStyle moneyStyle = workbook.createCellStyle();
+            moneyStyle.setFont(baseFont);
+            moneyStyle.setDataFormat(format.getFormat("#,##0"));
+            setBorders(moneyStyle);
 
-                Row headerRow = sheet.createRow(0);
+            // Style dữ liệu dạng số nguyên
+            CellStyle intStyle = workbook.createCellStyle();
+            intStyle.setFont(baseFont);
+            intStyle.setDataFormat(format.getFormat("#,##0"));
+            setBorders(intStyle);
 
-                String[] headers = {
-                        "Mã Đơn",
-                        "Rạp",
-                        "Ngày Thanh Toán",
-                        "Tổng Tiền",
-                        "Thuế VAT",
-                        "Doanh Thu Ròng",
-                        "Phương Thức Thanh Toán"
-                };
+            // Style văn bản thông thường có border
+            CellStyle textStyle = workbook.createCellStyle();
+            textStyle.setFont(baseFont);
+            setBorders(textStyle);
 
-                for (int i = 0; i < headers.length; i++) {
+            // Style nhãn in đậm (Dùng cho tổng cộng, hàng mục chính)
+            CellStyle labelBoldStyle = workbook.createCellStyle();
+            labelBoldStyle.setFont(boldFont);
+            setBorders(labelBoldStyle);
 
+            // Style số tiền in đậm
+            CellStyle moneyBoldStyle = workbook.createCellStyle();
+            moneyBoldStyle.setFont(boldFont);
+            moneyBoldStyle.setDataFormat(format.getFormat("#,##0"));
+            setBorders(moneyBoldStyle);
+
+            /*
+             * ==========================================
+             * SHEET 1 : CHI TIẾT DOANH THU ĐƠN HÀNG
+             * ==========================================
+             */
+            Sheet sheet = workbook.createSheet("Bao Cao Doanh Thu");
+            Row headerRow = sheet.createRow(0);
+
+            String[] headers = {
+                    "Mã Đơn", "Rạp", "Ngày Thanh Toán", 
+                    "Tổng Tiền (Gross)", "Thuế VAT (10%)", "Doanh Thu Ròng (Net)", 
+                    "Phương Thức"
+            };
+
+            for (int i = 0; i < headers.length; i++) {
                 Cell cell = headerRow.createCell(i);
-
                 cell.setCellValue(headers[i]);
-
                 cell.setCellStyle(headerStyle);
-                }
+            }
 
-                int rowIdx = 1;
+            int rowIdx = 1;
+            double totalGross = 0;
+            double totalTax = 0;
+            double totalNet = 0;
 
-                double totalGross = 0;
-                double totalTax = 0;
-                double totalNet = 0;
-
-                DateTimeFormatter formatter =
-                        DateTimeFormatter.ofPattern(
-                                "dd/MM/yyyy HH:mm"
-                        );
-
-                for (Order order : orders) {
-
-                double gross =
-                        order.getTotalAmount() == null
-                                ? 0
-                                : order.getTotalAmount();
-
+            for (Order order : orders) {
+                double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();
                 double tax = gross * VAT_RATE;
-
                 double net = gross - tax;
 
                 totalGross += gross;
@@ -138,170 +164,264 @@ public class ReportServiceImpl implements ReportService {
                 totalNet += net;
 
                 Row row = sheet.createRow(rowIdx++);
+                
+                Cell c0 = row.createCell(0); c0.setCellValue(order.getId() != null ? order.getId().toString() : ""); c0.setCellStyle(textStyle);
+                Cell c1 = row.createCell(1); c1.setCellValue(order.getCinemaItem() != null ? order.getCinemaItem().getName() : "N/A"); c1.setCellStyle(textStyle);
+                Cell c2 = row.createCell(2); c2.setCellValue(order.getCreatedAt() != null ? order.getCreatedAt().format(DATE_FORMATTER) : "N/A"); c2.setCellStyle(textStyle);
 
-                row.createCell(0)
-                        .setCellValue(order.getId());
+                Cell grossCell = row.createCell(3); grossCell.setCellValue(gross); grossCell.setCellStyle(moneyStyle);
+                Cell taxCell = row.createCell(4); taxCell.setCellValue(tax); taxCell.setCellStyle(moneyStyle);
+                Cell netCell = row.createCell(5); netCell.setCellValue(net); netCell.setCellStyle(moneyStyle);
 
-                row.createCell(1)
-                        .setCellValue(
-                                order.getCinemaItem() != null
-                                        ? order.getCinemaItem().getName()
-                                        : "N/A"
-                        );
+                Cell c6 = row.createCell(6); c6.setCellValue(order.getPaymentMethod() != null ? order.getPaymentMethod() : "N/A"); c6.setCellStyle(textStyle);
+            }
 
-                row.createCell(2)
-                        .setCellValue(
-                                order.getCreatedAt()
-                                        .format(formatter)
-                        );
+            // Dòng tổng cộng cho Sheet 1
+            Row totalRow = sheet.createRow(rowIdx + 1);
+            for(int i=0; i<headers.length; i++) { totalRow.createCell(i).setCellStyle(labelBoldStyle); } // Tạo border trống cho cả dòng
+            
+            totalRow.getCell(2).setCellValue("TỔNG CỘNG");
+            totalRow.getCell(3).setCellValue(totalGross); totalRow.getCell(3).setCellStyle(moneyBoldStyle);
+            totalRow.getCell(4).setCellValue(totalTax);   totalRow.getCell(4).setCellStyle(moneyBoldStyle);
+            totalRow.getCell(5).setCellValue(totalNet);   totalRow.getCell(5).setCellStyle(moneyBoldStyle);
 
-                Cell grossCell = row.createCell(3);
-                grossCell.setCellValue(gross);
-                grossCell.setCellStyle(moneyStyle);
 
-                Cell taxCell = row.createCell(4);
-                taxCell.setCellValue(tax);
-                taxCell.setCellStyle(moneyStyle);
+            /*
+             * ==========================================
+             * SHEET 2 : DOANH THU THEO PHIM
+             * ==========================================
+             */
+            Sheet movieSheet = workbook.createSheet("Doanh Thu Phim");
+            Row movieHeader = movieSheet.createRow(0);
+            String[] movieHeaders = {"STT", "Tên Phim", "Doanh Thu"};
+            
+            for (int i = 0; i < movieHeaders.length; i++) {
+                Cell cell = movieHeader.createCell(i);
+                cell.setCellValue(movieHeaders[i]);
+                cell.setCellStyle(headerStyle);
+            }
 
-                Cell netCell = row.createCell(5);
-                netCell.setCellValue(net);
-                netCell.setCellStyle(moneyStyle);
+            int movieRowIdx = 1;
+            for (MovieRevenueDTO m : movies) {
+                Row row = movieSheet.createRow(movieRowIdx);
+                Cell c0 = row.createCell(0); c0.setCellValue(movieRowIdx); c0.setCellStyle(textStyle);
+                Cell c1 = row.createCell(1); c1.setCellValue(m.getMovieName() != null ? m.getMovieName() : "N/A"); c1.setCellStyle(textStyle);
+                
+                Cell revCell = row.createCell(2);
+                revCell.setCellValue(m.getRevenue());
+                revCell.setCellStyle(moneyStyle);
+                
+                movieRowIdx++;
+            }
 
-                row.createCell(6)
-                        .setCellValue(
-                                order.getPaymentMethod() != null
-                                        ? order.getPaymentMethod()
-                                        : "N/A"
-                        );
-                }
 
-                Row totalRow = sheet.createRow(rowIdx + 1);
+            /*
+             * ==========================================
+             * SHEET 3 : COMBO BẮP NƯỚC BÁN CHẠY
+             * ==========================================
+             */
+            Sheet comboSheet = workbook.createSheet("Combo Ban Chay");
+            Row comboHeader = comboSheet.createRow(0);
+            String[] comboHeaders = {"STT", "Tên Combo", "Số Lượng Bán", "Doanh Thu"};
+            
+            for (int i = 0; i < comboHeaders.length; i++) {
+                Cell cell = comboHeader.createCell(i);
+                cell.setCellValue(comboHeaders[i]);
+                cell.setCellStyle(headerStyle);
+            }
 
-                Cell totalLabel = totalRow.createCell(2);
-                totalLabel.setCellValue("TỔNG CỘNG");
-                totalLabel.setCellStyle(headerStyle);
+            int comboRowIdx = 1;
+            for (ComboReportResponse c : combos) {
+                Row row = comboSheet.createRow(comboRowIdx);
+                Cell c0 = row.createCell(0); c0.setCellValue(comboRowIdx); c0.setCellStyle(textStyle);
+                Cell c1 = row.createCell(1); c1.setCellValue(c.getComboName() != null ? c.getComboName() : "N/A"); c1.setCellStyle(textStyle);
+                
+                Cell qtyCell = row.createCell(2);
+                qtyCell.setCellValue(c.getTotalQuantity() != null ? c.getTotalQuantity() : 0);
+                qtyCell.setCellStyle(intStyle);
+                
+                Cell revCell = row.createCell(3);
+                revCell.setCellValue(c.getTotalRevenue() != null ? c.getTotalRevenue() : 0.0);
+                revCell.setCellStyle(moneyStyle);
+                
+                comboRowIdx++;
+            }
 
-                Cell totalGrossCell = totalRow.createCell(3);
-                totalGrossCell.setCellValue(totalGross);
-                totalGrossCell.setCellStyle(moneyStyle);
 
-                Cell totalTaxCell = totalRow.createCell(4);
-                totalTaxCell.setCellValue(totalTax);
-                totalTaxCell.setCellStyle(moneyStyle);
+            /*
+             * ==========================================
+             * SHEET 4 : TỔNG HỢP DASHBOARD THỐNG KÊ (Đã căn chỉnh lại cột C cực đẹp)
+             * ==========================================
+             */
+            Sheet summarySheet = workbook.createSheet("Tong Hop");
+            AdminDashboardDTO dashboard = getAdminDashboard(cinemaId);
 
-                Cell totalNetCell = totalRow.createCell(5);
-                totalNetCell.setCellValue(totalNet);
-                totalNetCell.setCellStyle(moneyStyle);
+            double totalComboRevenue = combos.stream()
+                    .filter(c -> c.getTotalRevenue() != null)
+                    .mapToDouble(ComboReportResponse::getTotalRevenue)
+                    .sum();
 
-                for (int i = 0; i < headers.length; i++) {
-                sheet.autoSizeColumn(i);
-                }
+            String topMovie = movies.isEmpty() ? "Không có dữ liệu phim" : movies.get(0).getMovieName();
+            double topMovieRevenue = movies.isEmpty() ? 0.0 : movies.get(0).getRevenue();
 
-                workbook.write(out);
+            String topCombo = combos.isEmpty() ? "Không có dữ liệu combo" : combos.get(0).getComboName();
+            double topComboRevenue = combos.isEmpty() ? 0.0 : (combos.get(0).getTotalRevenue() != null ? combos.get(0).getTotalRevenue() : 0.0);
 
-                return new ByteArrayInputStream(
-                        out.toByteArray()
-                );
+            int summaryRowIdx = 0;
+            Row sHeaderRow = summarySheet.createRow(summaryRowIdx++);
+            
+            Cell hCell0 = sHeaderRow.createCell(0); hCell0.setCellValue("Hạng Mục Thống Kê"); hCell0.setCellStyle(headerStyle);
+            Cell hCell1 = sHeaderRow.createCell(1); hCell1.setCellValue("Thông Tin / Giá Trị"); hCell1.setCellStyle(headerStyle);
+            Cell hCell2 = sHeaderRow.createCell(2); hCell2.setCellValue("Doanh Thu Chi Tiết"); hCell2.setCellStyle(headerStyle);
+
+            // Hàng 1: Tổng doanh thu hệ thống
+            Row r1 = summarySheet.createRow(summaryRowIdx++);
+            Cell c1_0 = r1.createCell(0); c1_0.setCellValue("Tổng doanh thu hệ thống (Hôm nay)"); c1_0.setCellStyle(labelBoldStyle);
+            Cell c1_1 = r1.createCell(1); c1_1.setCellValue(dashboard.todayRevenue); c1_1.setCellStyle(moneyStyle);
+            Cell c1_2 = r1.createCell(2); c1_2.setCellValue("-"); c1_2.setCellStyle(textStyle);
+
+            // Hàng 2: Tổng số vé bán ra
+            Row r2 = summarySheet.createRow(summaryRowIdx++);
+            Cell c2_0 = r2.createCell(0); c2_0.setCellValue("Tổng số vé bán ra (Hôm nay)"); c2_0.setCellStyle(labelBoldStyle);
+            Cell c2_1 = r2.createCell(1); c2_1.setCellValue(dashboard.todayTickets); c2_1.setCellStyle(intStyle);
+            Cell c2_2 = r2.createCell(2); c2_2.setCellValue("-"); c2_2.setCellStyle(textStyle);
+
+            // Hàng 3: Tổng số suất chiếu
+            Row r3 = summarySheet.createRow(summaryRowIdx++);
+            Cell c3_0 = r3.createCell(0); c3_0.setCellValue("Tổng số suất chiếu (Hôm nay)"); c3_0.setCellStyle(labelBoldStyle);
+            Cell c3_1 = r3.createCell(1); c3_1.setCellValue(dashboard.todayShowtimes); c3_1.setCellStyle(intStyle);
+            Cell c3_2 = r3.createCell(2); c3_2.setCellValue("-"); c3_2.setCellStyle(textStyle);
+
+            // Hàng 4: Tỷ lệ lấp đầy rạp
+            Row r4 = summarySheet.createRow(summaryRowIdx++);
+            Cell c4_0 = r4.createCell(0); c4_0.setCellValue("Tỷ lệ lấp đầy rạp"); c4_0.setCellStyle(labelBoldStyle);
+            Cell c4_1 = r4.createCell(1); c4_1.setCellValue(String.format("%.2f%%", dashboard.occupancy)); c4_1.setCellStyle(textStyle);
+            Cell c4_2 = r4.createCell(2); c4_2.setCellValue("-"); c4_2.setCellStyle(textStyle);
+
+            // Hàng 5: Doanh thu Combo thực tế
+            Row r5 = summarySheet.createRow(summaryRowIdx++);
+            Cell c5_0 = r5.createCell(0); c5_0.setCellValue("Doanh thu Combo thực tế (Theo bộ lọc)"); c5_0.setCellStyle(labelBoldStyle);
+            Cell c5_1 = r5.createCell(1); c5_1.setCellValue(totalComboRevenue); c5_1.setCellStyle(moneyStyle);
+            Cell c5_2 = r5.createCell(2); c5_2.setCellValue("-"); c5_2.setCellStyle(textStyle);
+
+            // Hàng 6: Phim doanh thu đỉnh nhất (Thêm cột C doanh thu phim)
+            Row r6 = summarySheet.createRow(summaryRowIdx++);
+            Cell c6_0 = r6.createCell(0); c6_0.setCellValue("Phim doanh thu đỉnh nhất (Theo bộ lọc)"); c6_0.setCellStyle(labelBoldStyle);
+            Cell c6_1 = r6.createCell(1); c6_1.setCellValue(topMovie); c6_1.setCellStyle(textStyle);
+            Cell c6_2 = r6.createCell(2); c6_2.setCellValue(topMovieRevenue); c6_2.setCellStyle(moneyStyle);
+
+            // Hàng 7: Combo bán chạy nhất (Thêm cột C doanh thu combo)
+            Row r7 = summarySheet.createRow(summaryRowIdx++);
+            Cell c7_0 = r7.createCell(0); c7_0.setCellValue("Combo bán chạy nhất (Theo bộ lọc)"); c7_0.setCellStyle(labelBoldStyle);
+            Cell c7_1 = r7.createCell(1); c7_1.setCellValue(topCombo); c7_1.setCellStyle(textStyle);
+            Cell c7_2 = r7.createCell(2); c7_2.setCellValue(topComboRevenue); c7_2.setCellStyle(moneyStyle);
+
+
+            // --- TỰ ĐỘNG CÂN CHỈNH ĐỘ RỘNG CHO TẤT CẢ CÁC SHEETS ---
+            for (int i = 0; i < headers.length; i++) { sheet.autoSizeColumn(i); }
+            for (int i = 0; i < movieHeaders.length; i++) { movieSheet.autoSizeColumn(i); }
+            for (int i = 0; i < comboHeaders.length; i++) { comboSheet.autoSizeColumn(i); }
+            summarySheet.autoSizeColumn(0);
+            summarySheet.autoSizeColumn(1);
+            summarySheet.autoSizeColumn(2);
+
+            workbook.write(out);
+            return new ByteArrayInputStream(out.toByteArray());
         }
+    }
+
+    // --- HÀM TRỢ GIÚP TẠO ĐƯỜNG KẺ VIỀN Ô BIỂU ĐỒ ---
+    private void setBorders(CellStyle style) {
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+    }
+
+    @Override
+    public List<ComboReportResponse> getBestSellingCombos(Long cinemaId, LocalDateTime start, LocalDateTime end) {
+        // Fix lỗi cho Super Admin: Nếu cinemaId trống hoặc bằng 0 thì gọi hàm gom toàn hệ thống
+        if (cinemaId != null && cinemaId > 0) {
+            return orderDetailRepository.getBestSellingCombos(cinemaId, start, end);
+        } else {
+            return orderDetailRepository.getAllBestSellingCombos(start, end);
         }
+    }
 
-        @Override
-        public List<Map<String, Object>> getCinemaRankingData(
-                LocalDateTime start,
-                LocalDateTime end
-        ) {
+    @Override
+    public List<Map<String, Object>> getCinemaRankingData(LocalDateTime start, LocalDateTime end) {
+        return orderRepository.getCinemaRanking(start, end)
+                .stream()
+                .map(obj -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("name", obj[0]);
+                    map.put("revenue", obj[1]);
+                    return map;
+                })
+                .collect(Collectors.toList());
+    }
 
-                return orderRepository
-                        .getCinemaRanking(start, end)
-                        .stream()
-                        .map(obj -> {
-                        Map<String, Object> map = new HashMap<>();
-                        map.put("name", obj[0]);
-                        map.put("revenue", obj[1]);
-                        return map;
-                        })
-                        .collect(Collectors.toList());
-        }
+    @Override
+    public List<MovieRatingDTO> getMovieStatistics() {
+        return reviewRepository.getTopRatedMovies()
+                .stream()
+                .map(obj -> new MovieRatingDTO(
+                        (String) obj[0],
+                        ((Number) obj[1]).doubleValue(),
+                        ((Number) obj[2]).longValue()
+                ))
+                .collect(Collectors.toList());
+    }
 
-        @Override
-        public List<MovieRatingDTO> getMovieStatistics() {
-
-                return reviewRepository
-                        .getTopRatedMovies()
-                        .stream()
-                        .map(obj -> new MovieRatingDTO(
-                                (String) obj[0],
-                                ((Number) obj[1]).doubleValue(),
-                                ((Number) obj[2]).longValue()
-                        ))
-                        .collect(Collectors.toList());
-        }
-
-        @Override
-        public AdminDashboardDTO getAdminDashboard(Long cinemaId) {
-
+    @Override
+    public AdminDashboardDTO getAdminDashboard(Long cinemaId) {
         LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
 
         Double revenue;
         Long tickets;
         Long showtimes;
 
-        if (cinemaId != null) {
-
-                revenue = orderRepository.getTodayRevenueByCinema(cinemaId, startOfDay);
-                tickets = orderRepository.countTodayTicketsByCinema(cinemaId, startOfDay);
-                showtimes = showtimeRepository.countTodayShowtimesByCinema(cinemaId);
-
+        if (cinemaId != null && cinemaId > 0) {
+            revenue = orderRepository.getTodayRevenueByCinema(cinemaId, startOfDay);
+            tickets = orderRepository.countTodayTicketsByCinema(cinemaId, startOfDay);
+            showtimes = showtimeRepository.countTodayShowtimesByCinema(cinemaId);
         } else {
-
-                revenue = orderRepository.getTodayRevenue(startOfDay);
-                tickets = orderRepository.countTodayTickets(startOfDay);
-                showtimes = showtimeRepository.countTodayShowtimes();
+            revenue = orderRepository.getTodayRevenue(startOfDay);
+            tickets = orderRepository.countTodayTickets(startOfDay);
+            showtimes = showtimeRepository.countTodayShowtimes();
         }
 
-        revenue = revenue == null ? 0 : revenue;
-        tickets = tickets == null ? 0 : tickets;
-        showtimes = showtimes == null ? 0 : showtimes;
+        revenue = revenue == null ? 0.0 : revenue;
+        tickets = tickets == null ? 0L : tickets;
+        showtimes = showtimes == null ? 0L : showtimes;
 
-        double occupancy = showtimes > 0
-                ? (tickets * 100.0) / (showtimes * 100)
-                : 0;
+        double occupancy = showtimes > 0 ? (tickets * 100.0) / (showtimes * 100.0) : 0.0;
 
         return new AdminDashboardDTO(
                 revenue,
                 tickets,
                 showtimes,
-                Math.min(100, occupancy)
+                Math.min(100.0, occupancy)
         );
-        }
+    }
 
-        @Override
-        public List<RevenueChartDTO> getAdminRevenue7Days(Long cinemaId) {
-
+    @Override
+    public List<RevenueChartDTO> getAdminRevenue7Days(Long cinemaId) {
         LocalDateTime start = LocalDateTime.now().minusDays(7);
-
         return orderRepository.revenue7DaysByCinema(cinemaId, start)
                 .stream()
-                .map(o -> new RevenueChartDTO(
-                        o[0].toString(),
-                        ((Number) o[1]).doubleValue()
-                ))
+                .map(o -> new RevenueChartDTO(o[0].toString(), ((Number) o[1]).doubleValue()))
                 .collect(Collectors.toList());
-        }
+    }
 
-        private double calculateTax(Order order) {
-                double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();
-                return gross * VAT_RATE;
-        }
-
-        private double calculateNetRevenue(Order order) {
-                double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();
-                double tax = calculateTax(order);
-                return gross - tax;
-        }
-
-        @Override
-        public List<ComboReportResponse> getBestSellingCombos(Long cinemaId, LocalDateTime start, LocalDateTime end) {
-        return orderDetailRepository.getBestSellingCombos(cinemaId, start, end);
-        }
+    @Override
+    public List<MovieRevenueDTO> getMovieRevenue(LocalDateTime startDate, LocalDateTime endDate) {
+        return ticketRepository.getMovieRevenue(startDate, endDate)
+                .stream()
+                .map(row -> new MovieRevenueDTO(
+                        (String) row[0],
+                        ((Number) row[1]).doubleValue()
+                ))
+                .toList();
+    }
 }
