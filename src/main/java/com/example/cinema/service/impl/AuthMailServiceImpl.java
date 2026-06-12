@@ -21,6 +21,8 @@ public class AuthMailServiceImpl implements AuthMailService {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
+            // 🔥 ĐÃ THÊM: Chỉ định chính xác email người gửi và Tên hiển thị (Alias)
+            helper.setFrom("kienphatanh@11317999.brevosend.com", "A&K Cinema Security");            
             helper.setTo(toEmail);
             helper.setSubject("A&K CINEMA - MÃ XÁC THỰC QUÊN MẬT KHẨU");
 
