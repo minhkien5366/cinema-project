@@ -35,6 +35,9 @@ public class MailServiceImpl implements MailService {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
+            // 🔥 ĐÃ THÊM: Chỉ định email người gửi là kienphatanh@gmail.com
+            helper.setFrom("kienphatanh@gmail.com", "A&K Cinema Ticket");
+            
             helper.setTo(order.getUser().getEmail());
             helper.setSubject("A&K CINEMA - VÉ ĐIỆN TỬ XÁC NHẬN # " + order.getId());
 
