@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.NumberFormat;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.Comparator; // 🔥 ĐÃ THÊM: Thư viện để sắp xếp lấy vé mới nhất
 
 @Service
 @RequiredArgsConstructor
@@ -35,7 +36,7 @@ public class MailServiceImpl implements MailService {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
-            // 🔥 ĐÃ THÊM: Chỉ định email người gửi là kienphatanh@gmail.com
+            // Chỉ định email người gửi
             helper.setFrom("kienphatanh@gmail.com", "A&K Cinema Ticket");
             
             helper.setTo(order.getUser().getEmail());
@@ -63,6 +64,8 @@ public class MailServiceImpl implements MailService {
                     if ("TICKET".equals(od.getItemType())) {
                         detectedShowtimeId = ticketRepository.findAll().stream()
                                 .filter(t -> t.getSeat() != null && t.getSeat().getId().equals(od.getItemId()))
+                                // 🔥 FIX: Sắp xếp đảo ngược để luôn lấy cái vé MỚI NHẤT vừa tạo
+                                .sorted(Comparator.comparing(Ticket::getId).reversed()) 
                                 .map(t -> t.getShowtime().getId())
                                 .findFirst()
                                 .orElse(null);
