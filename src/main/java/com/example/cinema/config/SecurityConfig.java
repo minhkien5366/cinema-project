@@ -74,6 +74,13 @@ public class SecurityConfig {
                 // Trong file SecurityConfig.java, thêm dòng dưới đây:
                 .requestMatchers(HttpMethod.GET, "/api/v1/seats/**").permitAll()
                 .requestMatchers("/uploads/**").permitAll()
+                // CẤP QUYỀN CHO VNPAY CALLBACK
+                .requestMatchers("/api/v1/orders/vnpay-callback").permitAll()
+
+                // 🔥 ĐÃ THÊM MỚI: Cấp quyền cho đường hầm WebSocket và API lấy lịch sử chat
+                .requestMatchers("/ws/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/chat/history/**").permitAll()
+
                 
                 .anyRequest().authenticated()
             )
