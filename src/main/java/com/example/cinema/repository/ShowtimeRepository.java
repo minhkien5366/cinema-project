@@ -101,4 +101,7 @@ Long countTodayShowtimesByCinema(
         @Param("cinemaId") Long cinemaId,
         @Param("startOfDay") LocalDateTime startOfDay
 );
+
+// Lấy tất cả suất chiếu có thời gian bắt đầu từ thời điểm 'start' trở về sau
+List<Showtime> findByStartTimeAfterOrderByStartTimeAsc(LocalDateTime start);
 }
