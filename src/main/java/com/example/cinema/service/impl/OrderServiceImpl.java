@@ -22,6 +22,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 @Service
@@ -52,6 +55,12 @@ public class OrderServiceImpl implements OrderService {
     private String vnp_HashSecret;
     @Value("${vnpay.returnUrl:http://localhost:8080/api/v1/orders/vnpay-callback}")
     private String vnp_ReturnUrl;
+
+    // 🔥 HÀM BẢO VỆ CHỐNG NHÂN BẢN DỮ LIỆU CỦA JPA
+    public static <T> Predicate<T> distinctByKey(Function<? super T, ?> keyExtractor) {
+        Map<Object, Boolean> seen = new ConcurrentHashMap<>();
+        return t -> seen.putIfAbsent(keyExtractor.apply(t), Boolean.TRUE) == null;
+    }
 
     @Override
     @Transactional
@@ -444,13 +453,11 @@ public class OrderServiceImpl implements OrderService {
                 .filter(d -> "TICKET".equals(d.getItemType()) && seat.getId().equals(d.getItemId()))
                 .collect(Collectors.toList());
 
-        Order order = null;
-        for (OrderDetail od : matchingDetails) {
-            if (od.getOrder() != null && od.getOrder().getUser().getUserId().equals(sampleTicket.getUser().getUserId())) {
-                order = od.getOrder();
-                break;
-            }
-        }
+        Order order = matchingDetails.stream()
+                .filter(od -> od.getOrder() != null && od.getOrder().getUser().getUserId().equals(sampleTicket.getUser().getUserId()))
+                .map(OrderDetail::getOrder)
+                .max(Comparator.comparing(Order::getId)) 
+                .orElse(null);
 
         if (order == null) {
             throw new ResourceNotFoundException("Không tìm thấy hóa đơn gốc đi kèm mã đặt vé này!");
@@ -479,9 +486,6 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(order);
     }
     
-    // =========================================================================================
-    // 🔥 VÁ LỖI CHECK-IN: Lấy BookingCode từ Ticket mới nhất
-    // =========================================================================================
     @Override
     @Transactional
     public OrderResponse confirmCheckIn(Long orderId) {
@@ -511,30 +515,35 @@ public class OrderServiceImpl implements OrderService {
         return updateOrderStatus(orderId, "USED");
     }
     
+    // 🔥 VÁ LỖI LẶP HIỂN THỊ ĐƠN HÀNG TOÀN HỆ THỐNG
     @Override 
     public List<OrderResponse> getAllOrders() { 
         User user = getCurrentUser();
         Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
+        List<Order> rawOrders;
         
         if (isSuperAdmin(user)) {
-            return orderRepository.findAll(sort).stream()
-                    .map(this::mapToResponse)
-                    .collect(Collectors.toList());
+            rawOrders = orderRepository.findAll(sort);
+        } else if (user.getManagedCinemaItemId() == null) {
+            rawOrders = orderRepository.findAll(sort);
+        } else {
+            rawOrders = orderRepository.findByCinemaItem_Id(user.getManagedCinemaItemId(), sort);
         }
         
-        if (user.getManagedCinemaItemId() == null) {
-            return orderRepository.findAll(sort).stream()
-                    .map(this::mapToResponse)
-                    .collect(Collectors.toList());
-        }
-        
-        return orderRepository.findByCinemaItem_Id(user.getManagedCinemaItemId(), sort).stream()
+        return rawOrders.stream()
+                .filter(distinctByKey(Order::getId)) // Lọc bỏ dữ liệu bị nhân bản
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    @Override public List<OrderResponse> getMyOrders() { 
-        return orderRepository.findByUserEmail(getCurrentUser().getEmail(), Sort.by(Sort.Direction.DESC, "createdAt")).stream().map(this::mapToResponse).collect(Collectors.toList()); 
+    // 🔥 VÁ LỖI LẶP HIỂN THỊ ĐƠN HÀNG CỦA KHÁCH HÀNG (TRÊN ẢNH CỦA ÔNG)
+    @Override 
+    public List<OrderResponse> getMyOrders() { 
+        return orderRepository.findByUserEmail(getCurrentUser().getEmail(), Sort.by(Sort.Direction.DESC, "createdAt"))
+                .stream()
+                .filter(distinctByKey(Order::getId)) // Lọc bỏ dữ liệu bị nhân bản
+                .map(this::mapToResponse)
+                .collect(Collectors.toList()); 
     }
 
     @Override public OrderResponse getOrderById(Long id) { 
@@ -556,9 +565,6 @@ public class OrderServiceImpl implements OrderService {
         if (user.getManagedCinemaItemId() == null || !user.getManagedCinemaItemId().equals(cinemaId)) throw new RuntimeException("Không có quyền!"); 
     }
 
-    // =========================================================================================
-    // 🔥 VÁ LỖI MAP DỮ LIỆU: Bới móc lấy đúng Ticket mới nhất để tránh lộn suất chiếu quá khứ
-    // =========================================================================================
     private OrderResponse mapToResponse(Order order) {
         Long detectedShowtimeId = null;
         String realBookingCode = null;
@@ -605,7 +611,10 @@ public class OrderServiceImpl implements OrderService {
 
         final Long finalShowtimeId = detectedShowtimeId;
 
-        List<OrderDetailResponse> detailResponses = order.getOrderDetails().stream().map(d -> {
+        // 🔥 Chặn nhân bản luôn cả trong mảng OrderDetails đề phòng JPA lặp dữ liệu con
+        List<OrderDetailResponse> detailResponses = order.getOrderDetails().stream()
+                .filter(distinctByKey(OrderDetail::getId))
+                .map(d -> {
             String name = "";
             
             if ("TICKET".equals(d.getItemType()) && d.getItemId() != null) {
