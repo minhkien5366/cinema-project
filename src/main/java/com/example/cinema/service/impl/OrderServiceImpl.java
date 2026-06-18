@@ -53,7 +53,7 @@ public class OrderServiceImpl implements OrderService {
     @Value("${vnpay.returnUrl:http://localhost:8080/api/v1/orders/vnpay-callback}")
     private String vnp_ReturnUrl;
 
-  @Override
+    @Override
     @Transactional
     public OrderResponse createOrder(OrderRequest request) {
         User user = getCurrentUser();
@@ -226,7 +226,6 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        // 🔥 LƯU TRỮ VOUCHER DƯỚI DẠNG MỘT MÓN HÀNG ẢO
         if (request.getVoucherCode() != null && !request.getVoucherCode().trim().isEmpty()) {
             Voucher voucher = voucherService.validateAndGetVoucher(request.getVoucherCode(), showtime.getCinemaItem().getId(), total);
             total = Math.max(0.0, total - voucher.getDiscountValue());
@@ -237,27 +236,25 @@ public class OrderServiceImpl implements OrderService {
             dVoucher.setItemId(voucher.getId());
             dVoucher.setItemName(voucher.getCode());
             dVoucher.setQuantity(1);
-            dVoucher.setPrice(0.0); // Không cộng thêm tiền vào đơn
+            dVoucher.setPrice(0.0);
             details.add(dVoucher);
         }
 
-        // 🎯 FIX CHÍ MẠNG: Lưu lại tổng tiền ĐÃ GIẢM vào savedOrder TRƯỚC khi gọi sinh link VNPay
         savedOrder.setTotalAmount(total);
         orderDetailRepository.saveAll(details);
         savedOrder.setOrderDetails(details);
         
-        // Dòng này cực kỳ quan trọng: Ghi đè vào DB và trả ra object mới nhất có chứa giá đã giảm
         savedOrder = orderRepository.save(savedOrder); 
         
         OrderResponse response = mapToResponse(savedOrder);
 
         if ("VNPAY".equalsIgnoreCase(request.getPaymentMethod())) {
-            // Lúc này savedOrder đã ngậm giá đã trừ, ném vào sinh link VNPay là chuẩn 100%
             response.setPaymentUrl(generateVNPayUrl(savedOrder));
         }
 
         return response;
     }
+    
     private String generateVNPayUrl(Order order) {
         long amount = (long) (order.getTotalAmount() * 100);
         Map<String, String> vnp_Params = new TreeMap<>();
@@ -300,11 +297,7 @@ public class OrderServiceImpl implements OrderService {
         return vnp_PayUrl + "?" + queryUrl + "&vnp_SecureHash=" + vnp_SecureHash;
     }
 
-    // =========================================================================
-    // 🎯 HÀM QUYỀN LỰC: CẬP NHẬT TRẠNG THÁI TỪ VNPAY 
-    // (ĐÃ BỌC LÓT VÉ, HOÀN KHO VÀ XỬ LÝ MÃ GIẢM GIÁ TẬN GỐC)
-    // =========================================================================
-  @Override
+    @Override
     @Transactional
     public OrderResponse updateOrderStatus(Long orderId, String newStatus) {
         Order order = orderRepository.findById(orderId)
@@ -314,7 +307,6 @@ public class OrderServiceImpl implements OrderService {
         boolean isCancelStatus = "CANCELLED".equals(status) || "FAILED".equals(status);
         boolean isSuccessStatus = "PAID".equals(status);
 
-        // Chặn luồng nếu đơn đã bị Hủy/Fail từ trước, tránh cộng kho 2 lần
         if (("CANCELLED".equals(order.getStatus()) || "FAILED".equals(order.getStatus())) && isCancelStatus) {
             return mapToResponse(order);
         }
@@ -325,10 +317,7 @@ public class OrderServiceImpl implements OrderService {
             List<Ticket> ticketsToUpdate = new ArrayList<>();
             
             for (OrderDetail d : order.getOrderDetails()) {
-                
-                // 1. 🎯 CẬP NHẬT ĐỒNG BỘ TRẠNG THÁI VÉ (Tìm đích danh vé đang BOOKED của User này)
                 if ("TICKET".equals(d.getItemType())) {
-                    // Xóa hẳn cái showtimeId đi, dùng ID ghế và ID user để tóm chính xác vé
                     List<Ticket> tickets = ticketRepository.findBySeatIdAndUserIdAndStatus(
                             d.getItemId(), 
                             order.getUser().getUserId(), 
@@ -336,12 +325,11 @@ public class OrderServiceImpl implements OrderService {
                     );
                     
                     for (Ticket t : tickets) {
-                        t.setStatus(status); // Đổi thành PAID, CANCELLED hoặc FAILED
+                        t.setStatus(status);
                         ticketsToUpdate.add(t);
                     }
                 }
                 
-                // 2. NẾU BỊ HỦY/THẤT BẠI -> HOÀN LẠI KHO BẮP NƯỚC THEO ĐÚNG RẠP
                 if (isCancelStatus && "COMBO".equals(d.getItemType())) {
                     Long cinemaItemId = order.getCinemaItem().getId(); 
                     cinemaComboRepository.findByCinemaItemIdAndComboId(cinemaItemId, d.getItemId())
@@ -353,15 +341,12 @@ public class OrderServiceImpl implements OrderService {
                         });
                 }
                 
-                // 3. NẾU THANH TOÁN THÀNH CÔNG -> CHỐT SỔ VOUCHER CỦA USER
                 if (isSuccessStatus && "VOUCHER".equals(d.getItemType())) {
                     Voucher voucher = voucherRepository.findById(d.getItemId()).orElse(null);
                     if (voucher != null) {
-                        // Tăng lượt đã dùng lên (tương đương trừ đi số lượng kho Voucher)
                         voucher.setUsedCount(voucher.getUsedCount() + 1);
                         voucherRepository.save(voucher);
                         
-                        // Xóa vĩnh viễn voucher này khỏi ví của User (bảng user_vouchers)
                         User orderUser = order.getUser();
                         orderUser.getVouchers().removeIf(v -> v.getId().equals(voucher.getId()));
                         userRepository.save(orderUser);
@@ -369,7 +354,6 @@ public class OrderServiceImpl implements OrderService {
                 }
             }
             
-            // Lưu toàn bộ vé đã đổi trạng thái
             if (!ticketsToUpdate.isEmpty()) {
                 ticketRepository.saveAll(ticketsToUpdate);
             }
@@ -377,7 +361,6 @@ public class OrderServiceImpl implements OrderService {
         
         Order savedOrder = orderRepository.save(order);
         
-        // 4. Cộng điểm thưởng khi thanh toán thành công
         if ("PAID".equals(status)) {
             User user = savedOrder.getUser();
             int earnedPoints = (int) (savedOrder.getTotalAmount() / 10000);
@@ -385,7 +368,6 @@ public class OrderServiceImpl implements OrderService {
             userRepository.save(user);
         }
         
-        // 5. Cập nhật bảng Payment
         Optional<Payment> paymentOpt = paymentRepository.findByOrderId(savedOrder.getId());
         Payment payment = paymentOpt.orElse(new Payment());
         payment.setOrder(savedOrder);
@@ -394,7 +376,6 @@ public class OrderServiceImpl implements OrderService {
         payment.setPaidAt(LocalDateTime.now());
         paymentRepository.save(payment);
         
-        // 6. Thông báo ngầm (Mail/Socket)
         if ("PAID".equals(status) || "USED".equals(status)) {
             if ("PAID".equals(status)) mailService.sendOrderConfirmation(savedOrder);
 
@@ -413,9 +394,7 @@ public class OrderServiceImpl implements OrderService {
 
         return mapToResponse(savedOrder);
     }
-    // =========================================================================
-    // HỦY ĐƠN THỦ CÔNG (Được gom chung vào updateOrderStatus để tái sử dụng logic)
-    // =========================================================================
+
     @Transactional
     public String cancelOrder(Long orderId) {
         Order order = orderRepository.findById(orderId)
@@ -425,15 +404,10 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Đơn hàng này đã được hủy trước đó!");
         }
 
-        // Gọi thẳng hàm quyền lực ở trên để xử lý mượt mà cả Hủy vé lẫn Hoàn kho bắp nước
         updateOrderStatus(orderId, "CANCELLED");
-        
         return "Hủy đơn hàng thành công, đã hoàn trả ghế và bắp nước vào kho!";
     }
 
-    // =========================================================================
-    // CÁC HÀM GET, SCAN, CHECK-IN GIỮ NGUYÊN (KHÔNG ẢNH HƯỞNG)
-    // =========================================================================
     @Override
     public OrderResponse scanOrderTicket(String bookingCode) {
         User staff = getCurrentUser();
@@ -505,42 +479,28 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(order);
     }
     
+    // =========================================================================================
+    // 🔥 VÁ LỖI CHECK-IN: Lấy BookingCode từ Ticket mới nhất
+    // =========================================================================================
     @Override
     @Transactional
     public OrderResponse confirmCheckIn(Long orderId) {
-
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Đơn hàng không tồn tại"));
 
-        List<Long> showtimeIds =
-                orderRepository.findShowtimeIdByOrderId(order.getId());
-
-        Long showtimeId =
-                showtimeIds.isEmpty() ? null : showtimeIds.get(0);
-
         String foundBookingCode = "N/A";
-
-        if (order.getOrderDetails() != null && showtimeId != null) {
-
+        
+        if (order.getOrderDetails() != null) {
             for (OrderDetail d : order.getOrderDetails()) {
+                if ("TICKET".equals(d.getItemType()) && d.getItemId() != null) {
+                    List<Ticket> tickets = ticketRepository.findAll().stream()
+                            .filter(t -> t.getSeat() != null && t.getSeat().getId().equals(d.getItemId())
+                                    && t.getUser() != null && t.getUser().getUserId().equals(order.getUser().getUserId()))
+                            .sorted(Comparator.comparing(Ticket::getId).reversed())
+                            .collect(Collectors.toList());
 
-                if ("TICKET".equals(d.getItemType())) {
-
-                    List<Ticket> tickets =
-                            ticketRepository.findBySeatIdAndShowtimeId(
-                                    d.getItemId(),
-                                    showtimeId
-                            );
-
-                    Optional<Ticket> correctTicket = tickets.stream()
-                            .filter(t -> t.getUser() != null
-                                    && t.getUser().getUserId()
-                                    .equals(order.getUser().getUserId()))
-                            .max(Comparator.comparing(Ticket::getId));
-
-                    if (correctTicket.isPresent()) {
-                        foundBookingCode =
-                                correctTicket.get().getBookingCode();
+                    if (!tickets.isEmpty()) {
+                        foundBookingCode = tickets.get(0).getBookingCode();
                         break;
                     }
                 }
@@ -548,7 +508,6 @@ public class OrderServiceImpl implements OrderService {
         }
 
         scanOrderTicket(foundBookingCode);
-
         return updateOrderStatus(orderId, "USED");
     }
     
@@ -597,22 +556,29 @@ public class OrderServiceImpl implements OrderService {
         if (user.getManagedCinemaItemId() == null || !user.getManagedCinemaItemId().equals(cinemaId)) throw new RuntimeException("Không có quyền!"); 
     }
 
+    // =========================================================================================
+    // 🔥 VÁ LỖI MAP DỮ LIỆU: Bới móc lấy đúng Ticket mới nhất để tránh lộn suất chiếu quá khứ
+    // =========================================================================================
     private OrderResponse mapToResponse(Order order) {
-        List<Long> showtimeIds = orderRepository.findShowtimeIdByOrderId(order.getId());
-        Long showtimeId = showtimeIds.isEmpty() ? null : showtimeIds.get(0);
-        String realBookingCode = null; 
+        Long detectedShowtimeId = null;
+        String realBookingCode = null;
 
         if (order.getOrderDetails() != null) {
             for (OrderDetail od : order.getOrderDetails()) {
                 if ("TICKET".equals(od.getItemType()) && od.getItemId() != null) {
-                    Optional<Ticket> myTicket = ticketRepository.findBySeatIdAndShowtimeId(od.getItemId(), showtimeId)
-                            .stream()
-                            .filter(t -> t.getUser() != null && t.getUser().getUserId().equals(order.getUser().getUserId()))
-                            .max(Comparator.comparing(Ticket::getId)); 
+                    List<Ticket> myTickets = ticketRepository.findAll().stream()
+                            .filter(t -> t.getSeat() != null && t.getSeat().getId().equals(od.getItemId())
+                                    && t.getUser() != null && t.getUser().getUserId().equals(order.getUser().getUserId()))
+                            .sorted(Comparator.comparing(Ticket::getId).reversed())
+                            .collect(Collectors.toList());
 
-                    if (myTicket.isPresent()) {
-                        realBookingCode = myTicket.get().getBookingCode();
-                        break; 
+                    if (!myTickets.isEmpty()) {
+                        Ticket latestTicket = myTickets.get(0);
+                        if (latestTicket.getShowtime() != null) {
+                            detectedShowtimeId = latestTicket.getShowtime().getId();
+                            realBookingCode = latestTicket.getBookingCode();
+                            break; 
+                        }
                     }
                 }
             }
@@ -626,8 +592,8 @@ public class OrderServiceImpl implements OrderService {
         DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
         DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
 
-        if (showtimeId != null) {
-            Optional<Showtime> showtimeOpt = showtimeRepository.findById(showtimeId);
+        if (detectedShowtimeId != null) {
+            Optional<Showtime> showtimeOpt = showtimeRepository.findById(detectedShowtimeId);
             if (showtimeOpt.isPresent()) {
                 Showtime st = showtimeOpt.get();
                 movieTitle = st.getMovie() != null ? st.getMovie().getTitle() : movieTitle;
@@ -637,21 +603,21 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        final Long finalShowtimeId = showtimeId;
+        final Long finalShowtimeId = detectedShowtimeId;
 
         List<OrderDetailResponse> detailResponses = order.getOrderDetails().stream().map(d -> {
             String name = "";
             
-            if ("TICKET".equals(d.getItemType())) {
+            if ("TICKET".equals(d.getItemType()) && d.getItemId() != null) {
                 if (finalShowtimeId != null) {
-                    List<Ticket> tickets = ticketRepository.findBySeatIdAndShowtimeId(d.getItemId(), finalShowtimeId);
-                    
-                    Optional<Ticket> myTicket = tickets.stream()
-                            .filter(t -> t.getUser() != null && t.getUser().getUserId().equals(order.getUser().getUserId()))
-                            .max(Comparator.comparing(Ticket::getId));
+                    List<Ticket> tickets = ticketRepository.findAll().stream()
+                            .filter(t -> t.getSeat() != null && t.getSeat().getId().equals(d.getItemId())
+                                    && t.getShowtime() != null && t.getShowtime().getId().equals(finalShowtimeId)
+                                    && t.getUser() != null && t.getUser().getUserId().equals(order.getUser().getUserId()))
+                            .collect(Collectors.toList());
 
-                    if (myTicket.isPresent()) {
-                        Ticket t = myTicket.get();
+                    if (!tickets.isEmpty()) {
+                        Ticket t = tickets.get(0);
                         name = "Ghế " + t.getSeatName() + " (Hàng " + t.getSeatRow() + " - Số " + t.getSeatNumber() + ")";
                     } else {
                         name = "Vé Xem Phim";
@@ -660,9 +626,7 @@ public class OrderServiceImpl implements OrderService {
                     name = "Vé Xem Phim";
                 }
             } else if ("COMBO".equals(d.getItemType())) {
-                name = comboRepository.findById(d.getItemId())
-                        .map(Combo::getName)
-                        .orElse("Combo Bắp Nước");
+                name = comboRepository.findById(d.getItemId()).map(Combo::getName).orElse("Combo Bắp Nước");
             } else if ("VOUCHER".equals(d.getItemType())) {
                 name = "Voucher Giảm Giá (" + d.getItemName() + ")";
             }

@@ -24,6 +24,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -59,11 +60,18 @@ public class ShowtimeServiceImpl implements ShowtimeService {
         );
     }
 
+    // ==========================================
+    // 🔥 ADMIN: XEM ĐƯỢC CẢ LỊCH SỬ SUẤT CHIẾU TRONG QUÁ KHỨ
+    // ==========================================
     @Override
     public List<Showtime> getAll() {
         User user = getCurrentUser();
-        if (isSuperAdmin(user)) return showtimeRepository.findAll();
-        return showtimeRepository.findByCinemaItem_Id(user.getManagedCinemaItemId());
+        
+        if (isSuperAdmin(user)) {
+            return showtimeRepository.findAll();
+        } else {
+            return showtimeRepository.findByCinemaItem_Id(user.getManagedCinemaItemId());
+        }
     }
 
     @Override
@@ -202,9 +210,17 @@ public class ShowtimeServiceImpl implements ShowtimeService {
         return showtimeRepository.save(showtime);
     }
 
+    // ==========================================
+    // 🔥 USER: KHÁCH HÀNG CHỈ XEM ĐƯỢC SUẤT CHIẾU TRONG TƯƠNG LAI
+    // ==========================================
     @Override
     public List<Showtime> getByMovieAndDate(Long movieId, String dateStr) {
-        return showtimeRepository.findByMovieIdAndDate(movieId, LocalDate.parse(dateStr));
+        List<Showtime> showtimes = showtimeRepository.findByMovieIdAndDate(movieId, LocalDate.parse(dateStr));
+        
+        LocalDateTime now = LocalDateTime.now();
+        return showtimes.stream()
+                .filter(s -> s.getStartTime().isAfter(now))
+                .collect(Collectors.toList());
     }
 
     // ==========================================

@@ -34,4 +34,9 @@ public class ChatMemoryManager {
     public List<ChatMessageDto> getRoomHistory(String roomId) {
         return chatHistory.getOrDefault(roomId, new ArrayList<>());
     }
+
+    // 🔥 ĐÃ THÊM: Lấy toàn bộ danh sách các ID phòng đang mở
+    public Set<String> getAllRooms() {
+        return chatHistory.keySet();
+    }
 }

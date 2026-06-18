@@ -1,5 +1,6 @@
 package com.example.cinema.service.impl;
 
+import com.example.cinema.dto.ChatMessageDto;
 import com.example.cinema.entity.Cinema;
 import com.example.cinema.entity.CinemaItem;
 import com.example.cinema.entity.Movie;
@@ -17,204 +18,569 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AiChatServiceImpl {
 
     private final MovieRepository movieRepository;
     private final CinemaItemRepository cinemaItemRepository;
     private final CinemaRepository cinemaRepository;
     private final ShowtimeRepository showtimeRepository;
-    
-    // VÁ THÊM 2 REPOSITORY THEO YÊU CẦU
     private final PromotionRepository promotionRepository;
     private final ComboRepository comboRepository;
     
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper(); 
 
-    @Value("${ai.api.key}")
+    @Value("${ai.api.key:}")
     private String aiApiKey;
 
-    private static final String GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
+    @Value("${ai.gemini.model:gemini-2.0-flash}")
+    private String geminiModel;
 
-    public String getAiResponse(String userMessage) {
-        String primaryModel = "gemini-2.5-flash";
-        String backupModel = "gemini-1.5-flash";
+    @Value("${ai.gemini.backup-model:gemini-1.5-flash}")
+    private String geminiBackupModel;
+
+    @Value("${ai.gemini.thinking-budget:0}")
+    private int thinkingBudget;
+
+    @Value("${ai.gemini.max-output-tokens:512}")
+    private int maxOutputTokens;
+
+    @Value("${ai.gemini.temperature:0.1}")
+    private double temperature;
+
+    @Value("${ai.gemini.min-request-interval-ms:3000}")
+    private long minRequestIntervalMs;
+
+    @Value("${ai.gemini.cache-ttl-seconds:300}")
+    private long cacheTtlSeconds;
+
+    private static final String GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
+    private static final int MAX_HISTORY_MESSAGES = 4;
+    private static final int MAX_CACHE_ENTRIES = 200;
+    private static final long DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
+    private static final long DAILY_QUOTA_COOLDOWN_MS = 24 * 60 * 60 * 1000L;
+
+    private final Map<String, CachedResponse> responseCache = new ConcurrentHashMap<>();
+    private final Map<String, Long> modelBlockedUntil = new ConcurrentHashMap<>();
+    private final AtomicLong nextAllowedGeminiCallAt = new AtomicLong(0);
+
+    public String getAiResponse(String userMessage, List<ChatMessageDto> history) {
+        if (!hasText(userMessage)) {
+            return "Bạn muốn hỏi gì về phim, lịch chiếu, combo hoặc khuyến mãi ạ?";
+        }
+
+        if (!hasText(aiApiKey)) {
+            log.warn("Gemini API key is missing. Set GEMINI_API_KEY or ai.api.key before calling AI chat.");
+            return "AI chưa được cấu hình API key. Bạn vui lòng chọn 'Gặp Quản Lý' để được hỗ trợ ngay nhé!";
+        }
+
+        String cacheKey = buildCacheKey(userMessage, history);
+        String cachedReply = getCachedReply(cacheKey);
+        if (cachedReply != null) {
+            return cachedReply;
+        }
+
+        if (isRequestTooSoon()) {
+            return getRateLimitFallbackMessage();
+        }
 
         try {
-            return callGeminiApi(primaryModel, userMessage);
-        } catch (HttpServerErrorException.ServiceUnavailable | HttpServerErrorException.GatewayTimeout e) {
-            try {
-                return callGeminiApi(backupModel, userMessage);
-            } catch (Exception ex) {
-                return getFallbackErrorMessage();
+            if (isModelCoolingDown(geminiModel)) {
+                log.warn("Gemini model {} is cooling down after a quota/rate-limit error. Trying backup model.", geminiModel);
+                return tryBackupModel(userMessage, history, cacheKey, new GeminiApiException(429, "Primary model is cooling down", null));
             }
-        } catch (HttpClientErrorException.TooManyRequests e) {
-            try {
-                return callGeminiApi(backupModel, userMessage);
-            } catch (Exception ex) {
-                return getFallbackErrorMessage();
+
+            String reply = callGeminiApi(geminiModel, userMessage, history);
+            cacheReply(cacheKey, reply);
+            return reply;
+        } catch (GeminiApiException e) {
+            if (e.isAuthOrPermissionError()) {
+                log.warn("Gemini API key/permission error for model {}: {}", geminiModel, e.getMessage());
+                return getApiKeyFallbackMessage();
             }
+
+            if (e.isModelNotFound()) {
+                log.warn("Gemini model was not found or is not available: {}", e.getMessage());
+                return getModelFallbackMessage();
+            }
+
+            if (e.isQuotaOrRateLimit()) {
+                rememberModelCooldown(geminiModel, e);
+                log.warn("Gemini quota/rate limit reached for model {}: {}", geminiModel, e.getMessage());
+                return tryBackupModel(userMessage, history, cacheKey, e);
+            }
+
+            if (shouldTryBackupModel(e)) {
+                return tryBackupModel(userMessage, history, cacheKey, e);
+            }
+
+            log.warn("Gemini model {} failed: {}", geminiModel, e.getMessage());
+            return getFallbackErrorMessage();
         } catch (Exception e) {
+            log.warn("Gemini chat failed unexpectedly", e);
             return getFallbackErrorMessage();
         }
     }
 
-    private String callGeminiApi(String modelName, String userMessage) throws Exception {
-        String systemPrompt = buildSystemPrompt();
-        
+    private boolean shouldTryBackupModel(GeminiApiException exception) {
+        return hasText(geminiBackupModel)
+                && !geminiBackupModel.equals(geminiModel)
+                && exception.isTransientServerError();
+    }
+
+    private String tryBackupModel(String userMessage, List<ChatMessageDto> history, String cacheKey, GeminiApiException primaryException) {
+        if (!canTryBackupModel()) {
+            return primaryException != null && primaryException.isQuotaOrRateLimit()
+                    ? getQuotaFallbackMessage()
+                    : getFallbackErrorMessage();
+        }
+
+        if (isModelCoolingDown(geminiBackupModel)) {
+            log.warn("Gemini backup model {} is cooling down after a quota/rate-limit error.", geminiBackupModel);
+            return primaryException != null && primaryException.isQuotaOrRateLimit()
+                    ? getQuotaFallbackMessage()
+                    : getFallbackErrorMessage();
+        }
+
+        try {
+            log.info("Trying Gemini backup model {}", geminiBackupModel);
+            String reply = callGeminiApi(geminiBackupModel, userMessage, history);
+            cacheReply(cacheKey, reply);
+            return reply;
+        } catch (GeminiApiException backupException) {
+            if (backupException.isAuthOrPermissionError()) {
+                log.warn("Gemini API key/permission error for backup model {}: {}", geminiBackupModel, backupException.getMessage());
+                return getApiKeyFallbackMessage();
+            }
+
+            if (backupException.isModelNotFound()) {
+                log.warn("Gemini backup model was not found or is not available: {}", backupException.getMessage());
+                return getModelFallbackMessage();
+            }
+
+            if (backupException.isQuotaOrRateLimit()) {
+                rememberModelCooldown(geminiBackupModel, backupException);
+                log.warn("Gemini quota/rate limit reached for backup model {}: {}", geminiBackupModel, backupException.getMessage());
+                return getQuotaFallbackMessage();
+            }
+
+            log.warn("Gemini backup model {} failed: {}", geminiBackupModel, backupException.getMessage());
+            return getFallbackErrorMessage();
+        } catch (Exception backupException) {
+            log.warn("Gemini backup model {} failed unexpectedly", geminiBackupModel, backupException);
+            return getFallbackErrorMessage();
+        }
+    }
+
+    private boolean canTryBackupModel() {
+        return hasText(geminiModel)
+                && hasText(geminiBackupModel)
+                && !geminiBackupModel.trim().equals(geminiModel.trim());
+    }
+
+    private boolean isModelCoolingDown(String modelName) {
+        if (!hasText(modelName)) {
+            return false;
+        }
+
+        String normalizedModel = modelName.trim();
+        Long blockedUntil = modelBlockedUntil.get(normalizedModel);
+        if (blockedUntil == null) {
+            return false;
+        }
+
+        if (System.currentTimeMillis() >= blockedUntil) {
+            modelBlockedUntil.remove(normalizedModel);
+            return false;
+        }
+
+        return true;
+    }
+
+    private void rememberModelCooldown(String modelName, GeminiApiException exception) {
+        if (!hasText(modelName)) {
+            return;
+        }
+
+        long cooldownMs = exception.retryDelayMillis();
+        if (exception.isDailyQuotaExceeded()) {
+            cooldownMs = Math.max(cooldownMs, DAILY_QUOTA_COOLDOWN_MS);
+        } else if (cooldownMs <= 0) {
+            cooldownMs = DEFAULT_RATE_LIMIT_COOLDOWN_MS;
+        }
+
+        modelBlockedUntil.put(modelName.trim(), System.currentTimeMillis() + cooldownMs);
+    }
+
+    private boolean isRequestTooSoon() {
+        if (minRequestIntervalMs <= 0) {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        long nextAllowed = nextAllowedGeminiCallAt.get();
+        if (now < nextAllowed) {
+            return true;
+        }
+
+        return !nextAllowedGeminiCallAt.compareAndSet(nextAllowed, now + minRequestIntervalMs);
+    }
+
+    private String callGeminiApi(String modelName, String userMessage, List<ChatMessageDto> history) throws Exception {
         ObjectNode rootRequestNode = objectMapper.createObjectNode();
         
         ObjectNode systemInstruction = objectMapper.createObjectNode();
         ArrayNode siParts = systemInstruction.putArray("parts");
-        siParts.addObject().put("text", systemPrompt);
+        siParts.addObject().put("text", buildSystemPrompt());
         rootRequestNode.set("systemInstruction", systemInstruction);
+
+        ObjectNode generationConfig = rootRequestNode.putObject("generationConfig");
+        generationConfig.put("maxOutputTokens", maxOutputTokens);
+        generationConfig.put("temperature", temperature); 
+
+        StringBuilder contextBuilder = new StringBuilder();
+        if (history != null && !history.isEmpty()) {
+            contextBuilder.append("[THÔNG TIN LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ ĐỂ BẠN HIỂU NGỮ CẢNH]:\n");
+            int startIdx = Math.max(0, history.size() - MAX_HISTORY_MESSAGES);
+            for (int i = startIdx; i < history.size(); i++) {
+                ChatMessageDto msg = history.get(i);
+                String content = msg.getContent();
+                if (!hasText(content)) continue;
+                if ("[SYSTEM_CLOSE]".equals(content)) continue;
+                if (i == history.size() - 1 && content.equals(userMessage)) continue;
+
+                String prefix = "BOT".equals(msg.getSenderRole()) ? "AI đã trả lời: " : "Khách đã nói: ";
+                contextBuilder.append(prefix).append(content).append("\n");
+            }
+            contextBuilder.append("[KẾT THÚC LỊCH SỬ]\n\n");
+        }
+
+        String finalPrompt = contextBuilder.toString() + "CÂU HỎI MỚI HIỆN TẠI CỦA KHÁCH HÀNG: " + userMessage;
 
         ArrayNode contentsArray = rootRequestNode.putArray("contents");
         ObjectNode userContent = contentsArray.addObject();
         userContent.put("role", "user");
-        ArrayNode userParts = userContent.putArray("parts");
-        userParts.addObject().put("text", userMessage);
+        userContent.putArray("parts").addObject().put("text", finalPrompt);
 
         String requestBody = objectMapper.writeValueAsString(rootRequestNode);
-
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("x-goog-api-key", aiApiKey.trim());
         HttpEntity<String> request = new HttpEntity<>(requestBody, headers);
 
-        String fullUrl = GEMINI_BASE_URL + modelName + ":generateContent?key=" + aiApiKey;
-        ResponseEntity<String> response = restTemplate.postForEntity(fullUrl, request, String.class);
-        return extractTextFromGeminiResponse(response.getBody());
+        String fullUrl = GEMINI_BASE_URL + modelName.trim() + ":generateContent";
+        try {
+            ResponseEntity<String> response = restTemplate.postForEntity(fullUrl, request, String.class);
+            return extractTextFromGeminiResponse(response.getBody());
+        } catch (HttpStatusCodeException e) {
+            throw new GeminiApiException(e.getStatusCode().value(), e.getResponseBodyAsString(), e);
+        } catch (ResourceAccessException e) {
+            throw new GeminiApiException(504, e.getMessage(), e);
+        }
     }
 
     private String getFallbackErrorMessage() {
-        return "Xin lỗi bạn, hệ thống AI đang bận xử lý dữ liệu suất chiếu. Bạn vui lòng thử lại sau vài giây hoặc chọn 'Gặp Quản Lý' nhé!";
+        return "Xin lỗi bạn, hệ thống AI đang bận. Bạn vui lòng thử lại sau ít phút hoặc chọn 'Gặp Quản Lý' nhé!";
     }
 
+    private String getQuotaFallbackMessage() {
+        return "Xin lỗi bạn, AI đang tạm hết lượt hoặc bị giới hạn lưu lượng. Bạn chọn 'Gặp Quản Lý' để được hỗ trợ ngay, hoặc thử lại sau ít phút nhé!";
+    }
+
+    private String getApiKeyFallbackMessage() {
+        return "AI chưa dùng được API key Gemini hiện tại. Bạn vui lòng chọn 'Gặp Quản Lý' để được hỗ trợ ngay nhé!";
+    }
+
+    private String getModelFallbackMessage() {
+        return "Model AI đang cấu hình chưa khả dụng. Bạn vui lòng chọn 'Gặp Quản Lý' để được hỗ trợ ngay nhé!";
+    }
+
+    private String getRateLimitFallbackMessage() {
+        return "AI đang nhận hơi nhiều tin cùng lúc. Bạn chờ vài giây rồi gửi lại giúp mình nhé!";
+    }
+
+    // ======================================================================================================
+    // 🔥 VÁ LỖI LOGIC: Ép chỉ lấy suất chiếu từ BÂY GIỜ trở đi, loại bỏ suất chiếu buổi sáng đã xong
+    // ======================================================================================================
     private String buildSystemPrompt() {
         DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
         DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
 
-        // 1. LẤY CƠ CẤU PHÂN CẤP RẠP TO - RẠP CON
         List<Cinema> allCinemas = cinemaRepository.findAll();
         StringBuilder cinemaDataBuilder = new StringBuilder();
         for (Cinema cinema : allCinemas) {
             List<CinemaItem> subItems = cinemaItemRepository.findByCinemaId(cinema.getId());
             cinemaDataBuilder.append("- ").append(cinema.getName()).append("\n");
             for (CinemaItem item : subItems) {
-                cinemaDataBuilder.append("  * Cụm: ").append(item.getName())
-                        .append(" (Khu vực: ").append(item.getCity()).append(")\n");
+                cinemaDataBuilder.append("  * ").append(item.getName())
+                        .append(" (").append(item.getCity()).append(")\n");
             }
         }
         String cinemaBranches = cinemaDataBuilder.toString();
 
-        // 2. LẤY TOÀN BỘ SUẤT CHIẾU TỪ HÔM NAY TRONG VÒNG 7 NGÀY TỚI
-        LocalDateTime startOfToday = LocalDate.now().atStartOfDay();
-        List<Showtime> futureShowtimes = showtimeRepository.findByStartTimeAfterOrderByStartTimeAsc(startOfToday);
+        // 1. 🔥 FIX: LẤY CÁC SUẤT CHIẾU TỪ BÂY GIỜ TRỞ ĐI (KHÔNG LẤY TỪ 0H00 SÁNG NAY NỮA)
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime endOf3Days = LocalDate.now().atStartOfDay().plusDays(4);
+        
+        List<Showtime> allFutureShowtimes = showtimeRepository.findByStartTimeAfterOrderByStartTimeAsc(now);
+        List<Showtime> futureShowtimes = allFutureShowtimes.stream()
+                .filter(s -> s.getStartTime().isBefore(endOf3Days))
+                .collect(Collectors.toList());
+
+        // 2. MÓC RA ID CỦA CÁC PHIM THỰC SỰ CÓ LỊCH CHIẾU
+        Set<Long> moviesWithShowtimes = futureShowtimes.stream()
+                .map(s -> s.getMovie().getId())
+                .collect(Collectors.toSet());
 
         StringBuilder showtimeDataBuilder = new StringBuilder();
         if (futureShowtimes.isEmpty()) {
-            showtimeDataBuilder.append("Hiện tại hệ thống chưa xếp lịch chiếu cho những ngày tới.\n");
+            showtimeDataBuilder.append("Hiện tại chưa có suất chiếu nào.\n");
         } else {
-            // Sửa lỗi 'Cannot infer type': Thay 'var' bằng kiểu Map tường minh
             Map<String, List<Showtime>> showtimesByDate = futureShowtimes.stream()
                     .collect(Collectors.groupingBy(s -> s.getStartTime().format(dateFormatter)));
 
             showtimesByDate.forEach((dateStr, showtimeList) -> {
-                showtimeDataBuilder.append("📅 NGÀY: ").append(dateStr).append("\n");
-                
+                showtimeDataBuilder.append("Ngày: ").append(dateStr).append("\n");
                 Map<String, List<Showtime>> showtimesByMovie = showtimeList.stream()
                         .collect(Collectors.groupingBy(s -> s.getMovie().getTitle()));
 
                 showtimesByMovie.forEach((movieTitle, movieShowtimes) -> {
                     String hours = movieShowtimes.stream()
-                            .map(s -> s.getStartTime().format(timeFormatter) + " [" + s.getCinemaItem().getName() + "]")
+                            .map(s -> s.getStartTime().format(timeFormatter) + "[" + s.getCinemaItem().getName() + "]")
                             .collect(Collectors.joining(", "));
-                    showtimeDataBuilder.append("  + Phim: ").append(movieTitle).append(" -> Suất chiếu: ").append(hours).append("\n");
+                    showtimeDataBuilder.append(" + ").append(movieTitle).append(": ").append(hours).append("\n");
                 });
-                showtimeDataBuilder.append("\n");
             });
         }
         String allShowtimesCatalog = showtimeDataBuilder.toString();
 
-        // 3. LẤY DANH SÁCH PHIM THÔ ĐỂ AI RENDER THẺ 3D (Đã sửa lỗi infer type bằng cách chỉ định rõ <String>)
         List<Movie> allMovies = movieRepository.findAll(); 
-        String showingMovies = allMovies.stream()
-                .filter(m -> "Đang chiếu".equalsIgnoreCase(m.getStatus()) || "NOW_SHOWING".equalsIgnoreCase(m.getStatus()))
-                .<String>map(m -> "  + Phim (ID: " + m.getId() + "): " + m.getTitle() + " | Poster: " + m.getPosterUrl())
+        
+        // 🔥 DANH SÁCH 1: Liệt kê Tên các Phim Đang Chiếu chung chung (chưa chắc có lịch)
+        String allShowingMovieNames = allMovies.stream()
+                .filter(m -> m.getStatus() != null && (m.getStatus().equalsIgnoreCase("SHOWING") || m.getStatus().equalsIgnoreCase("NOW_SHOWING") || m.getStatus().equalsIgnoreCase("Đang chiếu")))
+                .map(Movie::getTitle)
+                .collect(Collectors.joining(", "));
+
+        // 🔥 DANH SÁCH 2: CÁC PHIM ĐANG CHIẾU MÀ PHẢI CÓ LỊCH CHIẾU (Dùng để in thẻ)
+        String showingMoviesWithShowtimes = allMovies.stream()
+                .filter(m -> m.getStatus() != null && (m.getStatus().equalsIgnoreCase("SHOWING") || m.getStatus().equalsIgnoreCase("NOW_SHOWING") || m.getStatus().equalsIgnoreCase("Đang chiếu")))
+                .filter(m -> moviesWithShowtimes.contains(m.getId())) // Chặn đứng phim không có lịch
+                .map(m -> " + Phim(ID:" + m.getId() + "): " + m.getTitle() + " | Poster: " + m.getPosterUrl())
                 .collect(Collectors.joining("\n"));
 
+        // 🔥 DANH SÁCH 3: PHIM SẮP CHIẾU
         String upcomingMovies = allMovies.stream()
-                .filter(m -> "Sắp chiếu".equalsIgnoreCase(m.getStatus()) || "UPCOMING".equalsIgnoreCase(m.getStatus()))
-                .<String>map(m -> "  + Phim (ID: " + m.getId() + "): " + m.getTitle() + " | Poster: " + m.getPosterUrl())
+                .filter(m -> m.getStatus() != null && (m.getStatus().equalsIgnoreCase("COMING_SOON") || m.getStatus().equalsIgnoreCase("UPCOMING") || m.getStatus().equalsIgnoreCase("Sắp chiếu")))
+                .map(m -> " + Phim(ID:" + m.getId() + "): " + m.getTitle() + " | Poster: " + m.getPosterUrl())
                 .collect(Collectors.joining("\n"));
 
-        // 4. LẤY DANH SÁCH KHUYẾN MÃI (PROMOTION) - ĐÃ THÊM VÀO PROMPT
         List<Promotion> allPromotions = promotionRepository.findAll();
         String promotionCatalog = allPromotions.stream()
-                .<String>map(p -> "  + Ưu đãi: " + p.getTitle() + " (Nội dung: " + p.getContent() + (p.getCinemaItem() != null ? " - Áp dụng tại: " + p.getCinemaItem().getName() : " - Toàn hệ thống") + ")")
+                .map(p -> " + Ưu đãi: " + p.getTitle() + " - " + p.getContent())
                 .collect(Collectors.joining("\n"));
-        if (promotionCatalog.isEmpty()) {
-            promotionCatalog = "  Hiện tại rạp chưa có chương trình khuyến mãi nào.";
-        }
+        if (promotionCatalog.isEmpty()) promotionCatalog = "Hiện tại rạp chưa có khuyến mãi nào.";
 
-        // 5. LẤY DANH SÁCH BẮP NƯỚC (COMBO) - ĐÃ THÊM VÀO PROMPT
         List<Combo> allCombos = comboRepository.findAll();
         String comboCatalog = allCombos.stream()
-                .<String>map(c -> "  + Gói: " + c.getName() + " | Giá: " + c.getPrice() + " VNĐ (Gồm có: " + c.getDescription() + ")")
+                .map(c -> " + " + c.getName() + " (" + c.getPrice() + " VND): " + c.getDescription())
                 .collect(Collectors.joining("\n"));
-        if (comboCatalog.isEmpty()) {
-            comboCatalog = "  Chưa có thông tin gói bắp nước.";
-        }
+        if (comboCatalog.isEmpty()) comboCatalog = "Chưa có thông tin combo bắp nước.";
 
-        // 6. SYSTEM PROMPT SIÊU CẤP ĐIỀU HƯỚNG SẠCH SẼ (GIẤU KÍN MÃ NGUỒN SQL)
         return "# VAI TRÒ\n" +
-                "Bạn là trợ lý ảo thông minh của hệ thống rạp phim A&K Cinema. Hãy trả lời bằng tiếng Việt lịch sự, ngắn gọn và tự nhiên.\n\n" +
+                "Bạn là trợ lý AI thông minh xuất sắc của rạp phim A&K Cinema. Hãy trả lời cực kỳ thông minh, ngắn gọn và hữu ích.\n\n" +
                 
-                "# DANH SÁCH DỮ LIỆU THỜI GIAN THỰC (Hôm nay là ngày " + LocalDate.now().format(dateFormatter) + ")\n" +
-                "## Danh sách cụm rạp:\n" + cinemaBranches + "\n" +
-                "## Lịch chiếu chi tiết theo từng ngày:\n" + allShowtimesCatalog + "\n" +
-                "## Phim đang chiếu:\n" + showingMovies + "\n" +
-                "## Phim sắp chiếu:\n" + upcomingMovies + "\n" +
-                "## Chương trình khuyến mãi đang áp dụng:\n" + promotionCatalog + "\n" +
-                "## Bảng giá các gói Combo bắp nước:\n" + comboCatalog + "\n\n" +
+                "# KỊCH BẢN GIAO TIẾP VÀ LỆNH CẤM TUYỆT ĐỐI:\n" +
+                "1. CHỈ ĐƯỢC PHÉP GIỚI THIỆU PHIM CÓ TRONG DỮ LIỆU. Tuyệt đối KHÔNG ĐƯỢC bịa tên phim trên mạng.\n" +
+                "2. HƯỚNG DẪN TRẢ LỜI CÂU HỎI VỀ PHIM:\n" +
+                "   - NẾU KHÁCH HỎI PHIM ĐANG CHIẾU: Bạn hãy liệt kê tự nhiên các phim từ danh sách [Phim Đang Chiếu Trên Hệ Thống]. Kế tiếp, BẮT BUỘC nói câu này: 'Tuy nhiên, các phim hiện tại CÓ SUẤT CHIẾU để bạn đặt vé ngay là:' sau đó dùng thẻ $$MOVIE...$$ để hiển thị các phim từ danh sách [Phim Thực Sự Có Lịch Chiếu].\n" +
+                "   - NẾU KHÁCH HỎI 'CÓ PHIM GÌ HAY': Hãy hỏi lại khách 'Bạn muốn tìm phim đang có lịch chiếu hay phim sắp ra mắt ạ?'. NẾU khách bảo 'Sắp ra mắt' thì lấy dữ liệu từ mục [Phim Sắp Chiếu] để trả lời.\n" +
+                "3. QUY TẮC IN THẺ PHIM (SỬA LỖI ĐỨT LINK ẢNH):\n" +
+                "   - Bất cứ khi nào bạn giới thiệu phim (đang có suất chiếu hoặc sắp chiếu), BẮT BUỘC in thẻ theo định dạng sau: $$MOVIE|id|tên_phim|url_ảnh$$\n" +
+                "   - VÍ DỤ CHUẨN: $$MOVIE|18|Phim 2|https://anh.jpg$$\n" +
+                "   - LỆNH CẤM CỰC KỲ QUAN TRỌNG: KHÔNG ĐƯỢC XUỐNG DÒNG (ENTER) HAY THÊM DẤU CÁCH BÊN TRONG THẺ. Thẻ phải nằm trên 1 dòng liên tục và kết thúc bằng đúng 2 dấu $$ liền nhau.\n" +
+                "   - KHÔNG in URL ảnh ra ngoài văn bản. Mọi URL bắt buộc phải bị nhốt bên trong thẻ $$MOVIE$$.\n" +
+                "   - Tối đa 2 thẻ $$MOVIE$$ mỗi tin nhắn. Nếu nhiều hơn thì thêm thẻ $$SEEMORE$$ vào cuối cùng.\n" +
+                "4. KHÔNG LỘ LỖI KỸ THUẬT: Cấm nhắc đến ID, JSON, Database.\n\n" +
                 
-                "# QUY ĐỊNH BẮT BUỘC KHI TƯ VẤN:\n" +
-                "1. Tuyệt đối KHÔNG ĐƯỢC để lộ các từ ngữ kỹ thuật như: 'SQL', 'Database', 'Repository', 'Bảng dữ liệu', 'Trường status', 'Mã phim ID', 'CinemaItem', 'Null' khi nói chuyện với khách hàng.\n" +
-                "2. Khi khách hỏi về lịch chiếu của một ngày bất kỳ, bạn bắt buộc phải quét mục [Lịch chiếu chi tiết theo từng ngày] để tìm đúng ngày tương ứng. Nếu ngày đó không xuất hiện, trả lời khéo léo là rạp chưa mở lịch chiếu chứ không tự bịa giờ.\n" +
-                "3. Khi khách hỏi về bắp nước hoặc ưu đãi, hãy dùng chính xác dữ liệu bắp nước và khuyến mãi ở trên để tư vấn tên gói và giá tiền cho khách.\n" +
-                "4. Định dạng chữ: Sử dụng dấu cặp sao `**chữ cần in đậm**` đối với tên phim, giờ chiếu, tên combo bắp nước hoặc thông tin giảm giá để tin nhắn hiển thị rõ ràng.\n\n" +
-                
-                "# QUY ĐỊNH PHẢN HỒI CHUNG\n" +
-                "- Khi khách hỏi tìm phim, gợi ý phim: BẮT BUỘC dùng định dạng hiển thị ảnh giao diện: $$MOVIE|id|tên_phim|url_ảnh$$\n" +
-                "- CHỈ ĐƯỢC hiện tối đa 2 thẻ $$MOVIE$$. Nếu từ 3 phim trở lên, in 2 phim đầu kèm một thẻ $$SEEMORE$$ cuối dòng.\n" +
-                "- Khi khách chat tự do hoặc hỏi về combo/khuyến mãi: Trả lời linh hoạt bằng văn bản thông thường và dấu in đậm, CẤM chèn thẻ giao diện $$MOVIE$$.";
+                "--- DỮ LIỆU CẬP NHẬT DUY NHẤT ĐƯỢC PHÉP SỬ DỤNG (" + LocalDate.now().format(dateFormatter) + ") ---\n" +
+                "## Phim Đang Chiếu Trên Hệ Thống (Chỉ liệt kê tên):\n" + (allShowingMovieNames.isEmpty() ? "Không có" : allShowingMovieNames) + "\n" +
+                "## Phim Thực Sự Có Lịch Chiếu (BẮT BUỘC dùng để in thẻ $$MOVIE$$):\n" + (showingMoviesWithShowtimes.isEmpty() ? "Không có phim nào đang có lịch chiếu" : showingMoviesWithShowtimes) + "\n" +
+                "## Phim Sắp Chiếu (COMING_SOON):\n" + (upcomingMovies.isEmpty() ? "Không có" : upcomingMovies) + "\n" +
+                "## Lịch Chiếu (3 ngày tới):\n" + allShowtimesCatalog + "\n" +
+                "## Khuyến Mãi:\n" + promotionCatalog + "\n" +
+                "## Combo Bắp Nước:\n" + comboCatalog;
     }
 
-    private String extractTextFromGeminiResponse(String json) {
-        try {
-            JsonNode rootNode = objectMapper.readTree(json);
-            return rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
-        } catch (Exception e) {
-            return "Kết nối dữ liệu AI đang bị nhiễu sóng, bạn vui lòng thử lại câu hỏi nhé!";
+    private String extractTextFromGeminiResponse(String json) throws Exception {
+        if (!hasText(json)) {
+            throw new GeminiApiException(0, "Gemini returned an empty response", null);
+        }
+
+        JsonNode rootNode = objectMapper.readTree(json);
+        if (rootNode.has("error")) {
+            JsonNode errorNode = rootNode.get("error");
+            throw new GeminiApiException(errorNode.path("code").asInt(0), errorNode.toString(), null);
+        }
+
+        JsonNode textNode = rootNode.path("candidates").path(0).path("content").path("parts").path(0).path("text");
+        if (textNode.isMissingNode() || !textNode.isTextual()) {
+            throw new GeminiApiException(0, "Gemini response did not include text", null);
+        }
+
+        return textNode.asText();
+    }
+
+    private String buildCacheKey(String userMessage, List<ChatMessageDto> history) {
+        StringBuilder builder = new StringBuilder(normalizeForCache(userMessage));
+        if (history != null && !history.isEmpty()) {
+            int startIdx = Math.max(0, history.size() - MAX_HISTORY_MESSAGES);
+            for (int i = startIdx; i < history.size(); i++) {
+                ChatMessageDto msg = history.get(i);
+                String content = msg.getContent();
+                if (!hasText(content) || "[SYSTEM_CLOSE]".equals(content)) {
+                    continue;
+                }
+                builder.append('|')
+                        .append(msg.getSenderRole())
+                        .append(':')
+                        .append(normalizeForCache(content));
+            }
+        }
+        return Integer.toHexString(builder.toString().hashCode());
+    }
+
+    private String getCachedReply(String cacheKey) {
+        CachedResponse cachedResponse = responseCache.get(cacheKey);
+        if (cachedResponse == null) {
+            return null;
+        }
+
+        if (System.currentTimeMillis() > cachedResponse.expiresAtMillis()) {
+            responseCache.remove(cacheKey);
+            return null;
+        }
+
+        return cachedResponse.reply();
+    }
+
+    private void cacheReply(String cacheKey, String reply) {
+        if (cacheTtlSeconds <= 0 || !hasText(reply)) {
+            return;
+        }
+
+        if (responseCache.size() >= MAX_CACHE_ENTRIES) {
+            responseCache.clear();
+        }
+
+        responseCache.put(cacheKey, new CachedResponse(reply, System.currentTimeMillis() + cacheTtlSeconds * 1000));
+    }
+
+    private String normalizeForCache(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private record CachedResponse(String reply, long expiresAtMillis) {
+    }
+
+    private static class GeminiApiException extends RuntimeException {
+        private final int statusCode;
+        private final String responseBody;
+
+        GeminiApiException(int statusCode, String responseBody, Throwable cause) {
+            super(responseBody, cause);
+            this.statusCode = statusCode;
+            this.responseBody = responseBody == null ? "" : responseBody;
+        }
+
+        boolean isQuotaOrRateLimit() {
+            String normalizedBody = responseBody.toLowerCase(Locale.ROOT);
+            return statusCode == 429
+                    || normalizedBody.contains("resource_exhausted")
+                    || normalizedBody.contains("rate limit");
+        }
+
+        boolean isDailyQuotaExceeded() {
+            String normalizedBody = responseBody.toLowerCase(Locale.ROOT);
+            return normalizedBody.contains("perday") || normalizedBody.contains("per day");
+        }
+
+        long retryDelayMillis() {
+            String marker = "\"retryDelay\"";
+            int markerIndex = responseBody.indexOf(marker);
+            if (markerIndex < 0) {
+                return 0;
+            }
+
+            int valueStart = responseBody.indexOf('"', markerIndex + marker.length());
+            if (valueStart < 0) {
+                return 0;
+            }
+
+            int valueEnd = responseBody.indexOf('"', valueStart + 1);
+            if (valueEnd < 0) {
+                return 0;
+            }
+
+            String retryDelay = responseBody.substring(valueStart + 1, valueEnd).trim();
+            if (!retryDelay.endsWith("s")) {
+                return 0;
+            }
+
+            try {
+                return Long.parseLong(retryDelay.substring(0, retryDelay.length() - 1)) * 1000;
+            } catch (NumberFormatException e) {
+                return 0;
+            }
+        }
+
+        boolean isAuthOrPermissionError() {
+            String normalizedBody = responseBody.toLowerCase(Locale.ROOT);
+            return statusCode == 401
+                    || statusCode == 403
+                    || normalizedBody.contains("api_key_invalid")
+                    || normalizedBody.contains("permission_denied")
+                    || normalizedBody.contains("api key");
+        }
+
+        boolean isModelNotFound() {
+            return statusCode == 404;
+        }
+
+        boolean isTransientServerError() {
+            return statusCode == 500 || statusCode == 503 || statusCode == 504;
         }
     }
 }
