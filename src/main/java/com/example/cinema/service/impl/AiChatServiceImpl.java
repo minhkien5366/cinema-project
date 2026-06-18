@@ -325,7 +325,7 @@ public class AiChatServiceImpl {
     }
 
     // ======================================================================================================
-    // 🔥 VÁ LỖI LOGIC: Ép chỉ lấy suất chiếu từ BÂY GIỜ trở đi, loại bỏ suất chiếu buổi sáng đã xong
+    // 🔥 VÁ LỖI GIAO TIẾP KÉM THÔNG MINH CỦA AI: Biến AI thành tư vấn viên cao cấp
     // ======================================================================================================
     private String buildSystemPrompt() {
         DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -343,7 +343,6 @@ public class AiChatServiceImpl {
         }
         String cinemaBranches = cinemaDataBuilder.toString();
 
-        // 1. 🔥 FIX: LẤY CÁC SUẤT CHIẾU TỪ BÂY GIỜ TRỞ ĐI (KHÔNG LẤY TỪ 0H00 SÁNG NAY NỮA)
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime endOf3Days = LocalDate.now().atStartOfDay().plusDays(4);
         
@@ -352,7 +351,6 @@ public class AiChatServiceImpl {
                 .filter(s -> s.getStartTime().isBefore(endOf3Days))
                 .collect(Collectors.toList());
 
-        // 2. MÓC RA ID CỦA CÁC PHIM THỰC SỰ CÓ LỊCH CHIẾU
         Set<Long> moviesWithShowtimes = futureShowtimes.stream()
                 .map(s -> s.getMovie().getId())
                 .collect(Collectors.toSet());
@@ -381,20 +379,17 @@ public class AiChatServiceImpl {
 
         List<Movie> allMovies = movieRepository.findAll(); 
         
-        // 🔥 DANH SÁCH 1: Liệt kê Tên các Phim Đang Chiếu chung chung (chưa chắc có lịch)
         String allShowingMovieNames = allMovies.stream()
                 .filter(m -> m.getStatus() != null && (m.getStatus().equalsIgnoreCase("SHOWING") || m.getStatus().equalsIgnoreCase("NOW_SHOWING") || m.getStatus().equalsIgnoreCase("Đang chiếu")))
                 .map(Movie::getTitle)
                 .collect(Collectors.joining(", "));
 
-        // 🔥 DANH SÁCH 2: CÁC PHIM ĐANG CHIẾU MÀ PHẢI CÓ LỊCH CHIẾU (Dùng để in thẻ)
         String showingMoviesWithShowtimes = allMovies.stream()
                 .filter(m -> m.getStatus() != null && (m.getStatus().equalsIgnoreCase("SHOWING") || m.getStatus().equalsIgnoreCase("NOW_SHOWING") || m.getStatus().equalsIgnoreCase("Đang chiếu")))
-                .filter(m -> moviesWithShowtimes.contains(m.getId())) // Chặn đứng phim không có lịch
+                .filter(m -> moviesWithShowtimes.contains(m.getId()))
                 .map(m -> " + Phim(ID:" + m.getId() + "): " + m.getTitle() + " | Poster: " + m.getPosterUrl())
                 .collect(Collectors.joining("\n"));
 
-        // 🔥 DANH SÁCH 3: PHIM SẮP CHIẾU
         String upcomingMovies = allMovies.stream()
                 .filter(m -> m.getStatus() != null && (m.getStatus().equalsIgnoreCase("COMING_SOON") || m.getStatus().equalsIgnoreCase("UPCOMING") || m.getStatus().equalsIgnoreCase("Sắp chiếu")))
                 .map(m -> " + Phim(ID:" + m.getId() + "): " + m.getTitle() + " | Poster: " + m.getPosterUrl())
@@ -413,24 +408,29 @@ public class AiChatServiceImpl {
         if (comboCatalog.isEmpty()) comboCatalog = "Chưa có thông tin combo bắp nước.";
 
         return "# VAI TRÒ\n" +
-                "Bạn là trợ lý AI thông minh xuất sắc của rạp phim A&K Cinema. Hãy trả lời cực kỳ thông minh, ngắn gọn và hữu ích.\n\n" +
+                "Bạn là Chuyên viên Chăm sóc Khách hàng AI cao cấp của rạp phim A&K Cinema. Tôn chỉ của bạn là: Lịch sự, Chuyên nghiệp, Tự nhiên và Trả lời ĐÚNG TRỌNG TÂM câu hỏi.\n\n" +
                 
-                "# KỊCH BẢN GIAO TIẾP VÀ LỆNH CẤM TUYỆT ĐỐI:\n" +
-                "1. CHỈ ĐƯỢC PHÉP GIỚI THIỆU PHIM CÓ TRONG DỮ LIỆU. Tuyệt đối KHÔNG ĐƯỢC bịa tên phim trên mạng.\n" +
-                "2. HƯỚNG DẪN TRẢ LỜI CÂU HỎI VỀ PHIM:\n" +
-                "   - NẾU KHÁCH HỎI PHIM ĐANG CHIẾU: Bạn hãy liệt kê tự nhiên các phim từ danh sách [Phim Đang Chiếu Trên Hệ Thống]. Kế tiếp, BẮT BUỘC nói câu này: 'Tuy nhiên, các phim hiện tại CÓ SUẤT CHIẾU để bạn đặt vé ngay là:' sau đó dùng thẻ $$MOVIE...$$ để hiển thị các phim từ danh sách [Phim Thực Sự Có Lịch Chiếu].\n" +
-                "   - NẾU KHÁCH HỎI 'CÓ PHIM GÌ HAY': Hãy hỏi lại khách 'Bạn muốn tìm phim đang có lịch chiếu hay phim sắp ra mắt ạ?'. NẾU khách bảo 'Sắp ra mắt' thì lấy dữ liệu từ mục [Phim Sắp Chiếu] để trả lời.\n" +
-                "3. QUY TẮC IN THẺ PHIM (SỬA LỖI ĐỨT LINK ẢNH):\n" +
-                "   - Bất cứ khi nào bạn giới thiệu phim (đang có suất chiếu hoặc sắp chiếu), BẮT BUỘC in thẻ theo định dạng sau: $$MOVIE|id|tên_phim|url_ảnh$$\n" +
-                "   - VÍ DỤ CHUẨN: $$MOVIE|18|Phim 2|https://anh.jpg$$\n" +
-                "   - LỆNH CẤM CỰC KỲ QUAN TRỌNG: KHÔNG ĐƯỢC XUỐNG DÒNG (ENTER) HAY THÊM DẤU CÁCH BÊN TRONG THẺ. Thẻ phải nằm trên 1 dòng liên tục và kết thúc bằng đúng 2 dấu $$ liền nhau.\n" +
-                "   - KHÔNG in URL ảnh ra ngoài văn bản. Mọi URL bắt buộc phải bị nhốt bên trong thẻ $$MOVIE$$.\n" +
-                "   - Tối đa 2 thẻ $$MOVIE$$ mỗi tin nhắn. Nếu nhiều hơn thì thêm thẻ $$SEEMORE$$ vào cuối cùng.\n" +
-                "4. KHÔNG LỘ LỖI KỸ THUẬT: Cấm nhắc đến ID, JSON, Database.\n\n" +
+                "# QUY TẮC GIAO TIẾP (BẮT BUỘC TUÂN THỦ):\n" +
+                "1. KHI KHÁCH CHÀO HỎI (Ví dụ: Hi, Xin chào, Alo...):\n" +
+                "   - CHỈ ĐƯỢC chào lại lịch sự và hỏi xem họ cần hỗ trợ gì (Ví dụ: 'Dạ A&K Cinema xin chào bạn! Mình có thể hỗ trợ bạn xem lịch chiếu, đặt vé hay tra cứu khuyến mãi ạ?').\n" +
+                "   - TUYỆT ĐỐI KHÔNG tự động xả một danh sách phim dài ngoằng khi khách chưa yêu cầu.\n" +
+                "2. KHI KHÁCH HỎI TÌM PHIM ĐANG CHIẾU:\n" +
+                "   - Hãy giao tiếp một cách thông minh. Ví dụ: 'Dạ hiện tại hệ thống đang chiếu các phim: [Danh sách tên phim].'.\n" +
+                "   - Kế tiếp, hãy kiểm tra danh sách [Phim Thực Sự Có Lịch Chiếu].\n" +
+                "     + NẾU CÓ DỮ LIỆU: Hãy nói tiếp 'Trong đó, các phim đang có suất chiếu để bạn đặt vé ngay là:' và hiển thị thẻ $$MOVIE...$$.\n" +
+                "     + NẾU TRỐNG (KHÔNG CÓ DỮ LIỆU): Hãy nói 'Tuy nhiên, hiện tại các phim này đang tạm hết suất chiếu trong ngày hôm nay. Bạn vui lòng quay lại sau nhé!'. TUYỆT ĐỐI KHÔNG ghi câu 'Các phim có suất chiếu là:' rồi để trống không.\n" +
+                "3. KHI KHÁCH HỎI PHIM SẮP CHIẾU / SẮP RA MẮT:\n" +
+                "   - Lấy dữ liệu từ danh sách [Phim Sắp Chiếu] để trả lời và hiển thị thẻ phim.\n" +
+                "4. QUY TẮC HIỂN THỊ THẺ ĐẶT VÉ (BẮT BUỘC):\n" +
+                "   - Chỉ in thẻ $$MOVIE...$$ cho các phim có trong mục [Phim Thực Sự Có Lịch Chiếu] hoặc [Phim Sắp Chiếu].\n" +
+                "   - Định dạng chuẩn xác: $$MOVIE|id|tên_phim|url_ảnh$$\n" +
+                "   - LỆNH CẤM: KHÔNG ĐƯỢC XUỐNG DÒNG (ENTER) HOẶC THÊM KHOẢNG TRẮNG VÀO GIỮA THẺ. Thẻ phải nằm trên 1 dòng liên tục.\n" +
+                "   - Tối đa hiển thị 2 thẻ trong 1 tin nhắn. Dư thì dùng thẻ $$SEEMORE$$.\n" +
+                "5. LỆNH CẤM KỸ THUẬT: Cấm nhắc đến các từ kỹ thuật như ID, JSON, Database, Lỗi. Cấm tự bịa tên phim trên mạng.\n\n" +
                 
                 "--- DỮ LIỆU CẬP NHẬT DUY NHẤT ĐƯỢC PHÉP SỬ DỤNG (" + LocalDate.now().format(dateFormatter) + ") ---\n" +
-                "## Phim Đang Chiếu Trên Hệ Thống (Chỉ liệt kê tên):\n" + (allShowingMovieNames.isEmpty() ? "Không có" : allShowingMovieNames) + "\n" +
-                "## Phim Thực Sự Có Lịch Chiếu (BẮT BUỘC dùng để in thẻ $$MOVIE$$):\n" + (showingMoviesWithShowtimes.isEmpty() ? "Không có phim nào đang có lịch chiếu" : showingMoviesWithShowtimes) + "\n" +
+                "## Phim Đang Chiếu Trên Hệ Thống (Chỉ dùng để nhắc tên phim):\n" + (allShowingMovieNames.isEmpty() ? "Không có" : allShowingMovieNames) + "\n" +
+                "## Phim Thực Sự Có Lịch Chiếu (BẮT BUỘC dùng dữ liệu này để in thẻ $$MOVIE$$):\n" + (showingMoviesWithShowtimes.isEmpty() ? "TRỐNG - Không có suất chiếu nào" : showingMoviesWithShowtimes) + "\n" +
                 "## Phim Sắp Chiếu (COMING_SOON):\n" + (upcomingMovies.isEmpty() ? "Không có" : upcomingMovies) + "\n" +
                 "## Lịch Chiếu (3 ngày tới):\n" + allShowtimesCatalog + "\n" +
                 "## Khuyến Mãi:\n" + promotionCatalog + "\n" +
