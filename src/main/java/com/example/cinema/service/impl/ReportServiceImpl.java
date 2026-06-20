@@ -43,7 +43,8 @@ public class ReportServiceImpl implements ReportService {
     @Autowired
     private TicketRepository ticketRepository;
 
-    private static final double VAT_RATE = 0.10;
+    // Thuế suất mặc định nếu frontend không gửi lên
+    private static final double DEFAULT_VAT_RATE = 0.10; 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
     private static final String FONT_FAMILY = "Times New Roman";
     private static final short FONT_SIZE = 13;
@@ -52,8 +53,13 @@ public class ReportServiceImpl implements ReportService {
     public ByteArrayInputStream exportRevenueReport(
             Long cinemaId,
             LocalDateTime start,
-            LocalDateTime end
+            LocalDateTime end,
+            Double taxRateInput // 🔥 Bổ sung nhận tham số tỷ lệ thuế từ Controller
     ) throws IOException {
+
+        // Tính toán tỷ lệ thuế động (Ví dụ: Nhận 10 -> quy đổi về 0.1). Nếu null mặc định là 10%
+        double currentVatRate = (taxRateInput != null) ? (taxRateInput / 100.0) : DEFAULT_VAT_RATE;
+        int displayTaxPercent = (taxRateInput != null) ? taxRateInput.intValue() : 10;
 
         // 1. Phân luồng lấy danh sách hóa đơn theo quyền Admin / Super-Admin
         List<Order> orders;
@@ -64,7 +70,7 @@ public class ReportServiceImpl implements ReportService {
         }
         if (orders == null) orders = new ArrayList<>();
 
-        // 2. Gọi dữ liệu cho các sheet phụ (Đã sửa hàm combo ở dưới để chạy được cho cả Super-Admin)
+        // 2. Gọi dữ liệu cho các sheet phụ
         List<MovieRevenueDTO> movies = getMovieRevenue(start, end);
         if (movies == null) movies = new ArrayList<>();
 
@@ -75,7 +81,7 @@ public class ReportServiceImpl implements ReportService {
                 Workbook workbook = new XSSFWorkbook();
                 ByteArrayOutputStream out = new ByteArrayOutputStream()
         ) {
-            // --- KHỞI TẠO ĐỊNH DẠNG FONT & STYLE (TIMES NEW ROMAN - 13PX) ---
+            // --- KHỞI TẠO ĐỊNH DẠNG FONT & STYLE ---
             Font baseFont = workbook.createFont();
             baseFont.setFontName(FONT_FAMILY);
             baseFont.setFontHeightInPoints(FONT_SIZE);
@@ -118,7 +124,7 @@ public class ReportServiceImpl implements ReportService {
             textStyle.setFont(baseFont);
             setBorders(textStyle);
 
-            // Style nhãn in đậm (Dùng cho tổng cộng, hàng mục chính)
+            // Style nhãn in đậm
             CellStyle labelBoldStyle = workbook.createCellStyle();
             labelBoldStyle.setFont(boldFont);
             setBorders(labelBoldStyle);
@@ -131,15 +137,16 @@ public class ReportServiceImpl implements ReportService {
 
             /*
              * ==========================================
-             * SHEET 1 : CHI TIẾT DOANH THU ĐƠN HÀNG
+             * SHEET 1 : CHI TIẾT DOANH THU ĐƠN HÀNG (ĐÃ BIẾN ĐỘNG THEO THUẾ)
              * ==========================================
              */
             Sheet sheet = workbook.createSheet("Bao Cao Doanh Thu");
             Row headerRow = sheet.createRow(0);
 
+            // 🔥 Tự động chèn con số phần trăm thực tế vào tiêu đề cột
             String[] headers = {
                     "Mã Đơn", "Rạp", "Ngày Thanh Toán", 
-                    "Tổng Tiền (Gross)", "Thuế VAT (10%)", "Doanh Thu Ròng (Net)", 
+                    "Tổng Tiền (Gross)", "Thuế VAT (" + displayTaxPercent + "%)", "Doanh Thu Ròng (Net)", 
                     "Phương Thức"
             };
 
@@ -156,7 +163,8 @@ public class ReportServiceImpl implements ReportService {
 
             for (Order order : orders) {
                 double gross = order.getTotalAmount() == null ? 0 : order.getTotalAmount();
-                double tax = gross * VAT_RATE;
+                // 🔥 Tính thuế dựa trên tỷ lệ động được truyền vào
+                double tax = gross * currentVatRate;
                 double net = gross - tax;
 
                 totalGross += gross;
@@ -178,13 +186,12 @@ public class ReportServiceImpl implements ReportService {
 
             // Dòng tổng cộng cho Sheet 1
             Row totalRow = sheet.createRow(rowIdx + 1);
-            for(int i=0; i<headers.length; i++) { totalRow.createCell(i).setCellStyle(labelBoldStyle); } // Tạo border trống cho cả dòng
+            for(int i=0; i<headers.length; i++) { totalRow.createCell(i).setCellStyle(labelBoldStyle); }
             
             totalRow.getCell(2).setCellValue("TỔNG CỘNG");
             totalRow.getCell(3).setCellValue(totalGross); totalRow.getCell(3).setCellStyle(moneyBoldStyle);
             totalRow.getCell(4).setCellValue(totalTax);   totalRow.getCell(4).setCellStyle(moneyBoldStyle);
             totalRow.getCell(5).setCellValue(totalNet);   totalRow.getCell(5).setCellStyle(moneyBoldStyle);
-
 
             /*
              * ==========================================
@@ -213,7 +220,6 @@ public class ReportServiceImpl implements ReportService {
                 
                 movieRowIdx++;
             }
-
 
             /*
              * ==========================================
@@ -247,10 +253,9 @@ public class ReportServiceImpl implements ReportService {
                 comboRowIdx++;
             }
 
-
             /*
              * ==========================================
-             * SHEET 4 : TỔNG HỢP DASHBOARD THỐNG KÊ (Đã căn chỉnh lại cột C cực đẹp)
+             * SHEET 4 : TỔNG HỢP DASHBOARD THỐNG KÊ
              * ==========================================
              */
             Sheet summarySheet = workbook.createSheet("Tong Hop");
@@ -274,48 +279,40 @@ public class ReportServiceImpl implements ReportService {
             Cell hCell1 = sHeaderRow.createCell(1); hCell1.setCellValue("Thông Tin / Giá Trị"); hCell1.setCellStyle(headerStyle);
             Cell hCell2 = sHeaderRow.createCell(2); hCell2.setCellValue("Doanh Thu Chi Tiết"); hCell2.setCellStyle(headerStyle);
 
-            // Hàng 1: Tổng doanh thu hệ thống
             Row r1 = summarySheet.createRow(summaryRowIdx++);
             Cell c1_0 = r1.createCell(0); c1_0.setCellValue("Tổng doanh thu hệ thống (Hôm nay)"); c1_0.setCellStyle(labelBoldStyle);
             Cell c1_1 = r1.createCell(1); c1_1.setCellValue(dashboard.todayRevenue); c1_1.setCellStyle(moneyStyle);
             Cell c1_2 = r1.createCell(2); c1_2.setCellValue("-"); c1_2.setCellStyle(textStyle);
 
-            // Hàng 2: Tổng số vé bán ra
             Row r2 = summarySheet.createRow(summaryRowIdx++);
             Cell c2_0 = r2.createCell(0); c2_0.setCellValue("Tổng số vé bán ra (Hôm nay)"); c2_0.setCellStyle(labelBoldStyle);
             Cell c2_1 = r2.createCell(1); c2_1.setCellValue(dashboard.todayTickets); c2_1.setCellStyle(intStyle);
             Cell c2_2 = r2.createCell(2); c2_2.setCellValue("-"); c2_2.setCellStyle(textStyle);
 
-            // Hàng 3: Tổng số suất chiếu
             Row r3 = summarySheet.createRow(summaryRowIdx++);
             Cell c3_0 = r3.createCell(0); c3_0.setCellValue("Tổng số suất chiếu (Hôm nay)"); c3_0.setCellStyle(labelBoldStyle);
             Cell c3_1 = r3.createCell(1); c3_1.setCellValue(dashboard.todayShowtimes); c3_1.setCellStyle(intStyle);
             Cell c3_2 = r3.createCell(2); c3_2.setCellValue("-"); c3_2.setCellStyle(textStyle);
 
-            // Hàng 4: Tỷ lệ lấp đầy rạp
             Row r4 = summarySheet.createRow(summaryRowIdx++);
             Cell c4_0 = r4.createCell(0); c4_0.setCellValue("Tỷ lệ lấp đầy rạp"); c4_0.setCellStyle(labelBoldStyle);
             Cell c4_1 = r4.createCell(1); c4_1.setCellValue(String.format("%.2f%%", dashboard.occupancy)); c4_1.setCellStyle(textStyle);
             Cell c4_2 = r4.createCell(2); c4_2.setCellValue("-"); c4_2.setCellStyle(textStyle);
 
-            // Hàng 5: Doanh thu Combo thực tế
             Row r5 = summarySheet.createRow(summaryRowIdx++);
             Cell c5_0 = r5.createCell(0); c5_0.setCellValue("Doanh thu Combo thực tế (Theo bộ lọc)"); c5_0.setCellStyle(labelBoldStyle);
             Cell c5_1 = r5.createCell(1); c5_1.setCellValue(totalComboRevenue); c5_1.setCellStyle(moneyStyle);
             Cell c5_2 = r5.createCell(2); c5_2.setCellValue("-"); c5_2.setCellStyle(textStyle);
 
-            // Hàng 6: Phim doanh thu đỉnh nhất (Thêm cột C doanh thu phim)
             Row r6 = summarySheet.createRow(summaryRowIdx++);
             Cell c6_0 = r6.createCell(0); c6_0.setCellValue("Phim doanh thu đỉnh nhất (Theo bộ lọc)"); c6_0.setCellStyle(labelBoldStyle);
             Cell c6_1 = r6.createCell(1); c6_1.setCellValue(topMovie); c6_1.setCellStyle(textStyle);
             Cell c6_2 = r6.createCell(2); c6_2.setCellValue(topMovieRevenue); c6_2.setCellStyle(moneyStyle);
 
-            // Hàng 7: Combo bán chạy nhất (Thêm cột C doanh thu combo)
             Row r7 = summarySheet.createRow(summaryRowIdx++);
             Cell c7_0 = r7.createCell(0); c7_0.setCellValue("Combo bán chạy nhất (Theo bộ lọc)"); c7_0.setCellStyle(labelBoldStyle);
             Cell c7_1 = r7.createCell(1); c7_1.setCellValue(topCombo); c7_1.setCellStyle(textStyle);
             Cell c7_2 = r7.createCell(2); c7_2.setCellValue(topComboRevenue); c7_2.setCellStyle(moneyStyle);
-
 
             // --- TỰ ĐỘNG CÂN CHỈNH ĐỘ RỘNG CHO TẤT CẢ CÁC SHEETS ---
             for (int i = 0; i < headers.length; i++) { sheet.autoSizeColumn(i); }
@@ -330,7 +327,6 @@ public class ReportServiceImpl implements ReportService {
         }
     }
 
-    // --- HÀM TRỢ GIÚP TẠO ĐƯỜNG KẺ VIỀN Ô BIỂU ĐỒ ---
     private void setBorders(CellStyle style) {
         style.setBorderTop(BorderStyle.THIN);
         style.setBorderBottom(BorderStyle.THIN);
@@ -340,7 +336,6 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     public List<ComboReportResponse> getBestSellingCombos(Long cinemaId, LocalDateTime start, LocalDateTime end) {
-        // Fix lỗi cho Super Admin: Nếu cinemaId trống hoặc bằng 0 thì gọi hàm gom toàn hệ thống
         if (cinemaId != null && cinemaId > 0) {
             return orderDetailRepository.getBestSellingCombos(cinemaId, start, end);
         } else {

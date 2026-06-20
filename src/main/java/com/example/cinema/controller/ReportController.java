@@ -32,22 +32,21 @@ public class ReportController {
 
 
     @PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
-    @GetMapping("/download")
-    public ResponseEntity<InputStreamResource> download(
-            @RequestParam Long cinemaId, 
-            // Thêm pattern vào đây để Spring tự parse chuỗi có dấu cách
-            @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime start, 
-            @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime end) throws IOException {
+        @GetMapping("/download")
+        public ResponseEntity<InputStreamResource> download(
+                @RequestParam(required = false) Long cinemaId,
+                @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime start, 
+                @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime end,
+                @RequestParam(required = false) Double taxRate 
+        ) throws IOException {
 
-        // Không dùng LocalDateTime.parse() nữa, dùng trực tiếp biến start/end
-        var inputStream = reportService.exportRevenueReport(cinemaId, start, end);
+            var inputStream = reportService.exportRevenueReport(cinemaId, start, end, taxRate);
 
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=BaoCaoDoanhThu.xlsx")
-                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
-                .body(new InputStreamResource(inputStream));
-    }
-
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=BaoCaoDoanhThu.xlsx")
+                    .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                    .body(new InputStreamResource(inputStream));
+        }
     @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     @GetMapping("/ranking")
     public ResponseEntity<?> getRanking(
@@ -80,10 +79,13 @@ public class ReportController {
                 reportService.getAdminRevenue7Days(cinemaId)
         );
     }
-    @PreAuthorize("hasRole('SUPER_ADMIN')")
+@PreAuthorize("hasRole('SUPER_ADMIN')")
     @GetMapping("/finance")
-    public ResponseEntity<?> getFinanceReport(@RequestParam String month) {
-        return ResponseEntity.ok(financeService.getMonthlyFinance(month));
+    public ResponseEntity<?> getFinanceReport(
+            @RequestParam String month,
+            @RequestParam(defaultValue = "10.0") Double taxRate) { // Nhận thêm phần trăm thuế, mặc định 10%
+        
+        return ResponseEntity.ok(financeService.getMonthlyFinance(month, taxRate));
     }
     @GetMapping("/combo-best-selling")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN')")
