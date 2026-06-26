@@ -320,6 +320,8 @@ public class OrderServiceImpl implements OrderService {
             return mapToResponse(order);
         }
 
+        // Lưu trạng thái cũ để kiểm tra xem đơn hàng đã từng được PAID chưa
+        String oldStatus = order.getStatus();
         order.setStatus(status);
 
         if (order.getOrderDetails() != null) {
@@ -370,9 +372,10 @@ public class OrderServiceImpl implements OrderService {
         
         Order savedOrder = orderRepository.save(order);
         
-        if ("PAID".equals(status)) {
+        // 🔥 QUY ĐỔI ĐIỂM CHUẨN: 10.000 VNĐ = 1 ĐIỂM
+        if (isSuccessStatus && !oldStatus.equalsIgnoreCase("PAID")) {
             User user = savedOrder.getUser();
-            int earnedPoints = (int) (savedOrder.getTotalAmount() / 10000);
+            int earnedPoints = (int) (savedOrder.getTotalAmount() / 10000); 
             user.setPoints(user.getPoints() + earnedPoints);
             userRepository.save(user);
         }
@@ -385,8 +388,8 @@ public class OrderServiceImpl implements OrderService {
         payment.setPaidAt(LocalDateTime.now());
         paymentRepository.save(payment);
         
-        if ("PAID".equals(status) || "USED".equals(status)) {
-            if ("PAID".equals(status)) mailService.sendOrderConfirmation(savedOrder);
+        if (isSuccessStatus || "USED".equals(status)) {
+            if (isSuccessStatus) mailService.sendOrderConfirmation(savedOrder);
 
             try {
                 Map<String, Object> adminNotify = new HashMap<>();
@@ -421,6 +424,7 @@ public class OrderServiceImpl implements OrderService {
     public OrderResponse scanOrderTicket(String bookingCode) {
         User staff = getCurrentUser();
 
+        // Lọc chính xác vé từ DB
         List<Ticket> tickets = ticketRepository.findAll().stream()
                 .filter(t -> bookingCode.equalsIgnoreCase(t.getBookingCode()))
                 .collect(Collectors.toList());
@@ -444,23 +448,35 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Xâm nhập sai chi nhánh! Vé này được mua tại cụm rạp '" + sampleTicket.getShowtime().getCinemaItem().getName() + "', không thể soát tại đây.");
         }
 
-        Seat seat = sampleTicket.getSeat();
-        if (seat == null) {
+        User buyer = sampleTicket.getUser();
+        if (buyer == null) {
+            throw new RuntimeException("Dữ liệu khách hàng đính kèm vé bị lỗi!");
+        }
+
+        Set<Long> ticketSeatIds = tickets.stream()
+                .filter(t -> t.getSeat() != null)
+                .map(t -> t.getSeat().getId())
+                .collect(Collectors.toSet());
+
+        if (ticketSeatIds.isEmpty()) {
             throw new RuntimeException("Dữ liệu vật lý ghế ngồi đính kèm mã đặt vé bị lỗi!");
         }
 
-        List<OrderDetail> matchingDetails = orderDetailRepository.findAll().stream()
-                .filter(d -> "TICKET".equals(d.getItemType()) && seat.getId().equals(d.getItemId()))
-                .collect(Collectors.toList());
-
-        Order order = matchingDetails.stream()
-                .filter(od -> od.getOrder() != null && od.getOrder().getUser().getUserId().equals(sampleTicket.getUser().getUserId()))
-                .map(OrderDetail::getOrder)
-                .max(Comparator.comparing(Order::getId)) 
+        // Tối ưu hiệu năng, tìm Order theo User thay vì toàn bộ DB
+        List<Order> userOrders = orderRepository.findByUserEmail(buyer.getEmail(), Sort.by(Sort.Direction.DESC, "createdAt"));
+        Order order = userOrders.stream()
+                .filter(o -> o.getOrderDetails() != null && o.getOrderDetails().stream()
+                        .anyMatch(d -> "TICKET".equals(d.getItemType()) && ticketSeatIds.contains(d.getItemId())))
+                .findFirst() 
                 .orElse(null);
 
         if (order == null) {
             throw new ResourceNotFoundException("Không tìm thấy hóa đơn gốc đi kèm mã đặt vé này!");
+        }
+
+        String showtimeStatus = sampleTicket.getShowtime().getStatus();
+        if ("CANCELLED".equalsIgnoreCase(showtimeStatus) || "PENDING_CANCEL".equalsIgnoreCase(showtimeStatus)) {
+            throw new RuntimeException("Vé lỗi: Suất chiếu này đã bị hủy bỏ từ hệ thống!");
         }
 
         String currentStatus = order.getStatus().toUpperCase();
@@ -468,6 +484,7 @@ public class OrderServiceImpl implements OrderService {
             case "USED":
                 throw new RuntimeException("CẢNH BÁO GIAN LẬN: Mã vé " + bookingCode + " này đã được soát trước đó!");
             case "CANCELLED":
+            case "CANCELED": 
                 throw new RuntimeException("Vé lỗi: Giao dịch này đã bị hủy bỏ hoặc hoàn tiền!");
             case "PENDING":
                 throw new RuntimeException("Vé chưa kích hoạt: Đơn hàng vẫn đang ở trạng thái chờ thanh toán!");
@@ -477,10 +494,8 @@ public class OrderServiceImpl implements OrderService {
                 throw new RuntimeException("Trạng thái vé không hợp lệ để soát tại quầy: " + currentStatus);
         }
 
-        if (sampleTicket.getShowtime() != null) {
-            if (sampleTicket.getShowtime().getStartTime().plusHours(2).isBefore(LocalDateTime.now())) {
-                throw new RuntimeException("Vé hết hạn! Suất chiếu của phim này đã kết thúc.");
-            }
+        if (sampleTicket.getShowtime().getStartTime().plusHours(2).isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Vé hết hạn! Phim đã chiếu xong hoặc đã diễn ra quá nửa thời lượng.");
         }
 
         return mapToResponse(order);
@@ -515,7 +530,6 @@ public class OrderServiceImpl implements OrderService {
         return updateOrderStatus(orderId, "USED");
     }
     
-    // 🔥 VÁ LỖI LẶP HIỂN THỊ ĐƠN HÀNG TOÀN HỆ THỐNG
     @Override 
     public List<OrderResponse> getAllOrders() { 
         User user = getCurrentUser();
@@ -531,7 +545,7 @@ public class OrderServiceImpl implements OrderService {
         }
         
         return rawOrders.stream()
-                .filter(distinctByKey(Order::getId)) // Lọc bỏ dữ liệu bị nhân bản
+                .filter(distinctByKey(Order::getId)) 
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
@@ -564,118 +578,95 @@ public class OrderServiceImpl implements OrderService {
         if (user.getManagedCinemaItemId() == null || !user.getManagedCinemaItemId().equals(cinemaId)) throw new RuntimeException("Không có quyền!"); 
     }
 
-private OrderResponse mapToResponse(Order order) {
-    Long detectedShowtimeId = null;
-    String realBookingCode = null;
+    private OrderResponse mapToResponse(Order order) {
+        Long detectedShowtimeId = null;
+        String realBookingCode = null;
 
-    if (order.getOrderDetails() != null) {
-        for (OrderDetail od : order.getOrderDetails()) {
-            if ("TICKET".equals(od.getItemType()) && od.getItemId() != null) {
-                // 💡 CHỈNH SỬA 1: Không dùng t.getSeat().getId() nữa để tránh sập khi Seat bị xóa.
-                // Lọc tất cả vé của User này, sau đó lấy thông tin của vé mới nhất.
-                List<Ticket> myTickets = ticketRepository.findAll().stream()
-                        .filter(t -> t.getUser() != null && t.getUser().getUserId().equals(order.getUser().getUserId()))
-                        .sorted(Comparator.comparing(Ticket::getId).reversed())
-                        .collect(Collectors.toList());
+        if (order.getOrderDetails() != null) {
+            for (OrderDetail od : order.getOrderDetails()) {
+                if ("TICKET".equals(od.getItemType()) && od.getItemId() != null) {
+                    List<Ticket> tickets = ticketRepository.findAll().stream()
+                            .filter(t -> t.getSeat() != null && t.getSeat().getId().equals(od.getItemId()))
+                            .filter(t -> t.getUser() != null && t.getUser().getUserId().equals(order.getUser().getUserId()))
+                            .sorted(Comparator.comparing(Ticket::getId).reversed())
+                            .collect(Collectors.toList());
 
-                if (!myTickets.isEmpty()) {
-                    Ticket latestTicket = myTickets.get(0);
-                    if (latestTicket.getShowtime() != null) {
-                        detectedShowtimeId = latestTicket.getShowtime().getId();
-                        realBookingCode = latestTicket.getBookingCode();
-                        break; 
+                    if (!tickets.isEmpty()) {
+                        Ticket latestTicket = tickets.get(0);
+                        if (latestTicket.getShowtime() != null) {
+                            detectedShowtimeId = latestTicket.getShowtime().getId();
+                            realBookingCode = latestTicket.getBookingCode();
+                            break; 
+                        }
                     }
                 }
             }
         }
-    }
 
-    String movieTitle = "Vé Xem Phim";
-    String roomName = "Phòng Chiếu Hệ Thống"; // 💡 Dự phòng tên phòng mặc định nếu Room bị xóa hẳn
-    String showDate = "Trong Ngày";
-    String showTime = "N/A";
+        String movieTitle = "Vé Xem Phim";
+        String roomName = "Phòng Chiếu Hệ Thống"; 
+        String showDate = "Trong Ngày";
+        String showTime = "N/A";
 
-    DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-    DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
+        DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
 
-    if (detectedShowtimeId != null) {
-        Optional<Showtime> showtimeOpt = showtimeRepository.findById(detectedShowtimeId);
-        if (showtimeOpt.isPresent()) {
-            Showtime st = showtimeOpt.get();
-            movieTitle = st.getMovie() != null ? st.getMovie().getTitle() : movieTitle;
-            
-            // 💡 CHỈNH SỬA 2: Kiểm tra null an toàn cho Room. Nếu Room bị xóa, st.getRoom() sẽ null.
-            if (st.getRoom() != null) {
-                roomName = st.getRoom().getName() != null ? st.getRoom().getName() : roomName;
-            }
-            
-            showDate = st.getStartTime().format(dateFormatter);
-            showTime = st.getStartTime().format(timeFormatter) + " - " + st.getEndTime().format(timeFormatter);
-        }
-    }
-
-    final Long finalShowtimeId = detectedShowtimeId;
-
-    List<OrderDetailResponse> detailResponses = order.getOrderDetails().stream()
-            .filter(distinctByKey(OrderDetail::getId))
-            .map(d -> {
-        String name = "";
-        
-        if ("TICKET".equals(d.getItemType()) && d.getItemId() != null) {
-            if (finalShowtimeId != null) {
-                // Lấy danh sách vé dựa trên suất chiếu và người dùng
-                List<Ticket> tickets = ticketRepository.findAll().stream()
-                        .filter(t -> t.getShowtime() != null && t.getShowtime().getId().equals(finalShowtimeId)
-                                && t.getUser() != null && t.getUser().getUserId().equals(order.getUser().getUserId()))
-                        .collect(Collectors.toList());
-
-                // 💡 CHỈNH SỬA 3: Tìm vé dựa trên dữ liệu text phẳng (t.getSeatName()) 
-                // thay vì bắt buộc so sánh Object Seat (t.getSeat().getId()) để tránh chết chương trình khi Seat bị xóa.
-                Optional<Ticket> matchedTicket = tickets.stream()
-                        .filter(t -> (t.getSeat() != null && t.getSeat().getId().equals(d.getItemId())) 
-                                  || (t.getSeatName() != null)) 
-                        .findFirst();
-
-                if (matchedTicket.isPresent()) {
-                    Ticket t = matchedTicket.get();
-                    // 💡 Lấy trực tiếp từ chuỗi text phẳng đã lưu cứng trong DB lúc mua vé
-                    name = t.getSeatName() != null ? t.getSeatName() : ("Hàng " + t.getSeatRow() + " Số " + t.getSeatNumber());
-                } else {
-                    name = "Vé Xem Phim";
+        if (detectedShowtimeId != null) {
+            Optional<Showtime> showtimeOpt = showtimeRepository.findById(detectedShowtimeId);
+            if (showtimeOpt.isPresent()) {
+                Showtime st = showtimeOpt.get();
+                movieTitle = st.getMovie() != null ? st.getMovie().getTitle() : movieTitle;
+                
+                if (st.getRoom() != null) {
+                    roomName = st.getRoom().getName() != null ? st.getRoom().getName() : roomName;
                 }
-            } else {
-                name = "Vé Xem Phim";
+                
+                showDate = st.getStartTime().format(dateFormatter);
+                showTime = st.getStartTime().format(timeFormatter) + " - " + st.getEndTime().format(timeFormatter);
             }
-        } else if ("COMBO".equals(d.getItemType())) {
-            name = comboRepository.findById(d.getItemId()).map(Combo::getName).orElse("Combo Bắp Nước");
-        } else if ("VOUCHER".equals(d.getItemType())) {
-            name = "Voucher Giảm Giá (" + d.getItemName() + ")";
         }
 
-        return OrderDetailResponse.builder()
-                .id(d.getId())
-                .itemId(d.getItemId())
-                .itemType(d.getItemType())
-                .quantity(d.getQuantity())
-                .price(d.getPrice())
-                .itemName(name) 
-                .build();
-    }).collect(Collectors.toList());
+        List<OrderDetailResponse> detailResponses = order.getOrderDetails().stream()
+                .filter(distinctByKey(OrderDetail::getId))
+                .map(d -> {
+            String name = "";
+            
+            if ("TICKET".equals(d.getItemType()) && d.getItemId() != null) {
+                // 🔥 VÁ LỖI HIỂN THỊ TÊN GHẾ TRỰC TIẾP TỪ DB GỐC
+                name = seatRepository.findById(d.getItemId())
+                        .map(Seat::getName)
+                        .orElse("Ghế N/A");
 
-    return OrderResponse.builder()
-            .id(order.getId())
-            .status(order.getStatus())
-            .totalAmount(order.getTotalAmount())
-            .paymentMethod(order.getPaymentMethod())
-            .createdAt(order.getCreatedAt())
-            .cinemaItemId(order.getCinemaItem() != null ? order.getCinemaItem().getId() : null)
-            .cinemaName(order.getCinemaItem() != null ? order.getCinemaItem().getName() : "N/A")
-            .movieTitle(movieTitle)  
-            .date(showDate)          
-            .time(showTime)          
-            .roomName(roomName)
-            .bookingCode(realBookingCode) 
-            .orderDetails(detailResponses) 
-            .build();
-}
+            } else if ("COMBO".equals(d.getItemType())) {
+                name = comboRepository.findById(d.getItemId()).map(Combo::getName).orElse("Combo Bắp Nước");
+            } else if ("VOUCHER".equals(d.getItemType())) {
+                name = "Voucher Giảm Giá (" + d.getItemName() + ")";
+            }
+
+            return OrderDetailResponse.builder()
+                    .id(d.getId())
+                    .itemId(d.getItemId())
+                    .itemType(d.getItemType())
+                    .quantity(d.getQuantity())
+                    .price(d.getPrice())
+                    .itemName(name) 
+                    .build();
+        }).collect(Collectors.toList());
+
+        return OrderResponse.builder()
+                .id(order.getId())
+                .status(order.getStatus())
+                .totalAmount(order.getTotalAmount())
+                .paymentMethod(order.getPaymentMethod())
+                .createdAt(order.getCreatedAt())
+                .cinemaItemId(order.getCinemaItem() != null ? order.getCinemaItem().getId() : null)
+                .cinemaName(order.getCinemaItem() != null ? order.getCinemaItem().getName() : "N/A")
+                .movieTitle(movieTitle)  
+                .date(showDate)          
+                .time(showTime)          
+                .roomName(roomName)
+                .bookingCode(realBookingCode) 
+                .orderDetails(detailResponses) 
+                .build();
+    }
 }

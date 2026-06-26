@@ -60,11 +60,11 @@ public class ShowtimeController {
     }
 
     @PostMapping("/import")
-        public ResponseEntity<?> importShowtime(
-                @RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> importShowtime(
+            @RequestParam("file") MultipartFile file) {
         showtimeService.importExcel(file);
         return ResponseEntity.ok("Import thành công");
-        }
+    }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
@@ -79,5 +79,41 @@ public class ShowtimeController {
         showtimeService.deleteShowtime(id);
         return ResponseEntity.ok(ApiResponse.<String>builder()
                 .status(200).message("Xóa thành công").build());
+    }
+
+    // ==========================================
+    // 🔥 API QUẢN LÝ YÊU CẦU HỦY VÉ DÀNH CHO ADMIN VÀ SUPER_ADMIN
+    // ==========================================
+
+    @PostMapping("/{id}/request-cancel")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Showtime>> requestCancel(
+            @PathVariable Long id, 
+            @RequestParam String reason) {
+        return ResponseEntity.ok(ApiResponse.<Showtime>builder()
+                .status(200)
+                .message("Đã gửi yêu cầu hủy suất chiếu thành công")
+                .data(showtimeService.requestCancel(id, reason))
+                .build());
+    }
+
+    @PostMapping("/{id}/approve-cancel")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<String>> approveCancel(@PathVariable Long id) {
+        showtimeService.approveCancel(id);
+        return ResponseEntity.ok(ApiResponse.<String>builder()
+                .status(200)
+                .message("Đã duyệt hủy suất chiếu thành công")
+                .build());
+    }
+
+    @PostMapping("/{id}/reject-cancel")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<Showtime>> rejectCancel(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.<Showtime>builder()
+                .status(200)
+                .message("Đã từ chối yêu cầu hủy")
+                .data(showtimeService.rejectCancel(id))
+                .build());
     }
 }

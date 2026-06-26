@@ -94,6 +94,12 @@ public class AiChatServiceImpl {
             return "Bạn muốn hỏi gì về phim, lịch chiếu, combo hoặc khuyến mãi ạ?";
         }
 
+        // 🔥 CHẶN ĐỨNG LỆNH ĐÓNG CHAT: Nếu nhận được [SYSTEM_CLOSE], AI sẽ trả lời giữ chân khách hàng
+        // và KHÔNG BAO GIỜ bị sập hay chuyển tiếp lệnh này lên Gemini.
+        if ("[SYSTEM_CLOSE]".equalsIgnoreCase(userMessage.trim())) {
+            return "Phiên trò chuyện với Quản lý đã kết thúc. Tuy nhiên, AI của A&K Cinema vẫn ở đây túc trực 24/7! Bạn cần mình hỗ trợ thêm thông tin gì không ạ?";
+        }
+
         if (!hasText(aiApiKey)) {
             log.warn("Gemini API key is missing. Set GEMINI_API_KEY or ai.api.key before calling AI chat.");
             return "AI chưa được cấu hình API key. Bạn vui lòng chọn 'Gặp Quản Lý' để được hỗ trợ ngay nhé!";
@@ -266,13 +272,18 @@ public class AiChatServiceImpl {
         StringBuilder contextBuilder = new StringBuilder();
         if (history != null && !history.isEmpty()) {
             contextBuilder.append("[THÔNG TIN LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ ĐỂ BẠN HIỂU NGỮ CẢNH]:\n");
-            int startIdx = Math.max(0, history.size() - MAX_HISTORY_MESSAGES);
-            for (int i = startIdx; i < history.size(); i++) {
-                ChatMessageDto msg = history.get(i);
+            
+            // Lọc bỏ đi [SYSTEM_CLOSE] trước khi nhét vào Gemini để tránh nó học vẹt
+            List<ChatMessageDto> validHistory = history.stream()
+                .filter(msg -> hasText(msg.getContent()) && !"[SYSTEM_CLOSE]".equals(msg.getContent()))
+                .collect(Collectors.toList());
+
+            int startIdx = Math.max(0, validHistory.size() - MAX_HISTORY_MESSAGES);
+            for (int i = startIdx; i < validHistory.size(); i++) {
+                ChatMessageDto msg = validHistory.get(i);
                 String content = msg.getContent();
-                if (!hasText(content)) continue;
-                if ("[SYSTEM_CLOSE]".equals(content)) continue;
-                if (i == history.size() - 1 && content.equals(userMessage)) continue;
+                
+                if (i == validHistory.size() - 1 && content.equals(userMessage)) continue;
 
                 String prefix = "BOT".equals(msg.getSenderRole()) ? "AI đã trả lời: " : "Khách đã nói: ";
                 contextBuilder.append(prefix).append(content).append("\n");
@@ -426,7 +437,8 @@ public class AiChatServiceImpl {
                 "   - Định dạng chuẩn xác: $$MOVIE|id|tên_phim|url_ảnh$$\n" +
                 "   - LỆNH CẤM: KHÔNG ĐƯỢC XUỐNG DÒNG (ENTER) HOẶC THÊM KHOẢNG TRẮNG VÀO GIỮA THẺ. Thẻ phải nằm trên 1 dòng liên tục.\n" +
                 "   - Tối đa hiển thị 2 thẻ trong 1 tin nhắn. Dư thì dùng thẻ $$SEEMORE$$.\n" +
-                "5. LỆNH CẤM KỸ THUẬT: Cấm nhắc đến các từ kỹ thuật như ID, JSON, Database, Lỗi. Cấm tự bịa tên phim trên mạng.\n\n" +
+                "5. LỆNH CẤM KỸ THUẬT: Cấm nhắc đến các từ kỹ thuật như ID, JSON, Database, Lỗi. Cấm tự bịa tên phim trên mạng.\n" +
+                "6. LỆNH CẤM NGHIÊM NGẶT NHẤT: TUYỆT ĐỐI KHÔNG BAO GIỜ được sinh ra hoặc in ra từ khóa '[SYSTEM_CLOSE]' trong câu trả lời của bạn dưới bất kỳ hình thức nào. Bạn là AI hoạt động 24/7, cấm tự ý đóng chat.\n\n" +
                 
                 "--- DỮ LIỆU CẬP NHẬT DUY NHẤT ĐƯỢC PHÉP SỬ DỤNG (" + LocalDate.now().format(dateFormatter) + ") ---\n" +
                 "## Phim Đang Chiếu Trên Hệ Thống (Chỉ dùng để nhắc tên phim):\n" + (allShowingMovieNames.isEmpty() ? "Không có" : allShowingMovieNames) + "\n" +

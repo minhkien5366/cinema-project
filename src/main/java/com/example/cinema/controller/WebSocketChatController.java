@@ -26,91 +26,147 @@ public class WebSocketChatController {
 
     @MessageMapping("/chat.sendMessage")
     public void processMessage(@Payload ChatMessageDto message) {
+        
+        // 🔥 VÁ LỖI ADMIN HIỂN THỊ "ĐÃ ĐÓNG": 
+        // Khi khách hàng gọi lại Admin, lập tức xóa sạch mọi lệnh [SYSTEM_CLOSE] cũ trong RAM
+        if ("ADMIN".equals(message.getReceiverRole()) && "USER".equals(message.getSenderRole())) {
+            try {
+                List<ChatMessageDto> history = chatMemoryManager.getRoomHistory(message.getRoomId());
+                if (history != null) {
+                    history.removeIf(m -> "[SYSTEM_CLOSE]".equals(m.getContent()));
+                }
+            } catch (Exception ignored) { }
+            
+            // Bắn một lệnh ngầm để gỡ cờ "đóng phiên" đang kẹt trên màn hình Admin/User
+            // SỬA LỖI: Dùng setter thay vì Constructor
+            ChatMessageDto reopenNotice = new ChatMessageDto();
+            reopenNotice.setRoomId(message.getRoomId());
+            reopenNotice.setSender("HỆ THỐNG");
+            reopenNotice.setContent("[SYSTEM_OPEN]");
+            reopenNotice.setSenderRole("SYSTEM");
+            reopenNotice.setReceiverRole("ADMIN");
+            reopenNotice.setCinemaItemId(message.getCinemaItemId());
+
+            messagingTemplate.convertAndSend("/topic/room/" + message.getRoomId(), reopenNotice);
+        }
+
         // Lưu tin nhắn của khách/Admin vào RAM
         chatMemoryManager.saveMessage(message);
         
-        // Phát tin nhắn này vào phòng chat (Cả màn hình User và Admin nếu đang mở phòng này đều nhảy chữ)
+        // Phát tin nhắn này vào phòng chat
         messagingTemplate.convertAndSend("/topic/room/" + message.getRoomId(), message);
 
         // PHÂN LUỒNG 1: Nếu khách đang ép chat với AI (BOT)
         if ("BOT".equals(message.getReceiverRole())) {
             
-            // 🔥 TRUYỀN LỊCH SỬ CHAT VÀO CHO AI ĐỂ NÓ NHỚ NGỮ CẢNH
             List<ChatMessageDto> history = chatMemoryManager.getRoomHistory(message.getRoomId());
-            
-            // Gọi AI (Truyền cả tin nhắn hiện tại VÀ lịch sử)
             String botReplyContent = aiChatService.getAiResponse(message.getContent(), history);
             
-            // Đóng gói tin nhắn của AI
-            ChatMessageDto botReply = new ChatMessageDto(
-                    message.getRoomId(),
-                    "A&K AI",
-                    botReplyContent,
-                    "BOT",
-                    "USER",
-                    null
-            );
+            // Đóng gói tin nhắn của AI - Dùng setter để tránh lỗi Constructor
+            ChatMessageDto botReply = new ChatMessageDto();
+            botReply.setRoomId(message.getRoomId());
+            botReply.setSender("A&K AI");
+            botReply.setContent(botReplyContent);
+            botReply.setSenderRole("BOT");
+            botReply.setReceiverRole("USER");
+            botReply.setCinemaItemId(null);
             
-            // Lưu tin của AI vào RAM và đẩy ngược về phòng chat
             chatMemoryManager.saveMessage(botReply);
             messagingTemplate.convertAndSend("/topic/room/" + message.getRoomId(), botReply);
             
         } 
-        // 🔥 PHÂN LUỒNG 2: Định tuyến gặp người thật theo đúng Chi nhánh
+        // PHÂN LUỒNG 2: Định tuyến gặp người thật theo đúng Chi nhánh
         else if ("ADMIN".equals(message.getReceiverRole())) {
             if (message.getCinemaItemId() != null) {
-                // Bắn thông báo đích danh tới Admin của chi nhánh đó
                 messagingTemplate.convertAndSend("/topic/admin.notifications.cinema." + message.getCinemaItemId(), message);
             } else {
-                // Dự phòng: Nếu tin nhắn lỗi không có mã rạp, đẩy vào kênh hỗ trợ tổng
                 messagingTemplate.convertAndSend("/topic/admin.notifications.general", message);
             }
         }
     }
 
-    // API HTTP thường để Admin khi bấm vào một phòng chat nào đó sẽ lấy được 50 câu chat gần nhất
     @GetMapping("/api/v1/chat/history/{roomId}")
     @ResponseBody
     public List<ChatMessageDto> getChatHistory(@PathVariable String roomId) {
-        return chatMemoryManager.getRoomHistory(roomId);
+        List<ChatMessageDto> rawHistory = chatMemoryManager.getRoomHistory(roomId);
+        if (rawHistory == null || rawHistory.isEmpty()) return rawHistory;
+
+        // LỌC THÔNG MINH CHO TÍNH NĂNG LOAD LẠI TRANG (F5)
+        boolean hasAdminReopen = false;
+        for (int i = rawHistory.size() - 1; i >= 0; i--) {
+            ChatMessageDto msg = rawHistory.get(i);
+            if ("ADMIN".equals(msg.getReceiverRole()) || "ADMIN".equals(msg.getSenderRole())) {
+                hasAdminReopen = true;
+                break;
+            } else if ("[SYSTEM_CLOSE]".equals(msg.getContent())) {
+                break;
+            }
+        }
+
+        if (hasAdminReopen) {
+            return rawHistory.stream()
+                    .filter(m -> !"[SYSTEM_CLOSE]".equals(m.getContent()))
+                    .collect(Collectors.toList());
+        }
+
+        return rawHistory;
     }
 
-    // API MỚI 1: Lấy danh sách các phòng chat đang mở của Rạp (Dành cho Admin khi F5)
     @GetMapping("/api/v1/chat/active-rooms/{cinemaItemId}")
     @ResponseBody
     public List<String> getActiveRoomsByCinema(@PathVariable Long cinemaItemId) {
         return chatMemoryManager.getAllRooms().stream()
             .filter(roomId -> {
                 List<ChatMessageDto> history = chatMemoryManager.getRoomHistory(roomId);
-                if (history.isEmpty()) return false;
+                if (history == null || history.isEmpty()) return false;
                 
-                // Phòng này phải có chứa tin nhắn gửi đến chi nhánh đang tìm
                 boolean matchCinema = history.stream()
                     .anyMatch(m -> cinemaItemId.equals(m.getCinemaItemId()));
                 
-                // Phòng này chưa bị kết thúc (Chưa có tin nhắn [SYSTEM_CLOSE])
-                boolean isClosed = history.stream()
-                    .anyMatch(m -> "[SYSTEM_CLOSE]".equals(m.getContent()));
+                boolean isClosed = false;
+                for (int i = history.size() - 1; i >= 0; i--) {
+                    ChatMessageDto msg = history.get(i);
+                    if ("[SYSTEM_CLOSE]".equals(msg.getContent())) {
+                        isClosed = true;
+                        break;
+                    } else if ("ADMIN".equals(msg.getReceiverRole()) || "ADMIN".equals(msg.getSenderRole())) {
+                        isClosed = false;
+                        break;
+                    }
+                }
                 
                 return matchCinema && !isClosed;
             })
             .collect(Collectors.toList());
     }
 
-    // API MỚI 2: Đóng / Hủy cuộc trò chuyện
     @PostMapping("/api/v1/chat/close/{roomId}")
     @ResponseBody
     public String closeChatRoom(@PathVariable String roomId) {
-        ChatMessageDto closeNotice = new ChatMessageDto(
-            roomId,
-            "HỆ THỐNG",
-            "[SYSTEM_CLOSE]",
-            "BOT",
-            "USER",
-            null
-        );
+        // 1. Gửi lệnh ngầm báo cho hệ thống Admin biết
+        ChatMessageDto closeNotice = new ChatMessageDto();
+        closeNotice.setRoomId(roomId);
+        closeNotice.setSender("HỆ THỐNG");
+        closeNotice.setContent("[SYSTEM_CLOSE]");
+        closeNotice.setSenderRole("SYSTEM");
+        closeNotice.setReceiverRole("USER");
+        closeNotice.setCinemaItemId(null);
+
         chatMemoryManager.saveMessage(closeNotice);
         messagingTemplate.convertAndSend("/topic/room/" + roomId, closeNotice);
+
+        // 2. Gửi tin nhắn từ AI thay thế chỗ Admin
+        ChatMessageDto aiWelcomeBack = new ChatMessageDto();
+        aiWelcomeBack.setRoomId(roomId);
+        aiWelcomeBack.setSender("A&K AI");
+        aiWelcomeBack.setContent("Quản lý đã rời khỏi cuộc trò chuyện. A&K AI đã quay trở lại để tiếp tục hỗ trợ bạn 24/7! Bạn cần mình giúp thêm gì không ạ?");
+        aiWelcomeBack.setSenderRole("BOT");
+        aiWelcomeBack.setReceiverRole("USER");
+        aiWelcomeBack.setCinemaItemId(null);
+
+        chatMemoryManager.saveMessage(aiWelcomeBack);
+        messagingTemplate.convertAndSend("/topic/room/" + roomId, aiWelcomeBack);
+
         return "SUCCESS";
     }
 }

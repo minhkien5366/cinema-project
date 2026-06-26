@@ -27,7 +27,7 @@ public class OrderController {
 
     // Đường dẫn trang Frontend mà ông muốn chuyển về sau khi thanh toán
     @Value("${frontend.url:https://akcinema.vercel.app}")
-    //@Value("${frontend.url:http://localhost:3000}")
+    // @Value("${frontend.url:http://localhost:3000}")
     
     private String frontendUrl;
 

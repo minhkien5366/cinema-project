@@ -36,4 +36,12 @@ public class Showtime {
     )
     @JsonIgnoreProperties("showtimes")
     private Room room;
+
+    // 🔥 THÊM TRƯỜNG TRẠNG THÁI VÀ LÝ DO ĐỂ DUYỆT HỦY VÉ
+    @Column(nullable = false)
+    @Builder.Default
+    private String status = "ACTIVE"; // Trạng thái: ACTIVE, PENDING_CANCEL, CANCELLED
+
+    @Column(columnDefinition = "TEXT")
+    private String cancelReason; // Lý do xin hủy
 }
