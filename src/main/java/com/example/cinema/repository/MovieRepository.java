@@ -17,7 +17,7 @@ public interface MovieRepository extends JpaRepository<Movie, Long> {
     
     // THAY THẾ HOẶC BỔ SUNG HÀM NÀY: Chỉ lấy bản ghi đầu tiên nếu trùng tên
     Optional<Movie> findFirstByTitle(String title);
-    
+    Optional<Movie> findFirstByTitleIgnoreCase(String title);
     Optional<Movie> findByTitle(String title);
     boolean existsByTitleIgnoreCase(String title);
 }

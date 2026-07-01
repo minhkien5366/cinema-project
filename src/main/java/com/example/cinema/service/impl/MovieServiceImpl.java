@@ -44,6 +44,25 @@ public class MovieServiceImpl implements MovieService {
     private final TicketRepository ticketRepository;
     private final ReviewRepository reviewRepository;
 
+    // 🔥 Cấu trúc nội bộ đồng bộ dữ liệu dòng trả về cho Front-end hiển thị danh sách
+    private static class RowMovieImportResult {
+        int rowIndex;
+        String title;
+        String genres;
+        String statusStr; // Trạng thái đọc từ Excel (Đang chiếu, Sắp chiếu...)
+        String status;    // SUCCESS, FAILED, PENDING
+        String errorMessage;
+
+        RowMovieImportResult(int rowIndex, String title, String genres, String statusStr, String status, String errorMessage) {
+            this.rowIndex = rowIndex;
+            this.title = title;
+            this.genres = genres;
+            this.statusStr = statusStr;
+            this.status = status;
+            this.errorMessage = errorMessage;
+        }
+    }
+
     @Override
     public Page<MovieDTO> getMovies(String search, String status, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
@@ -64,7 +83,6 @@ public class MovieServiceImpl implements MovieService {
         return new PageImpl<>(dtos, pageable, moviePage.getTotalElements());
     }
 
-    // 🎯 Dùng convertToDTO để đính kèm toàn bộ dữ liệu Full Option
     @Override
     public MovieDTO getMovieDetail(Long id) {
         Movie movie = movieRepository.findById(id)
@@ -146,49 +164,136 @@ public class MovieServiceImpl implements MovieService {
         Pageable top3 = PageRequest.of(0, 3);
         return ticketRepository.findTopMoviesByTicketSales(top3);
     }
-
-    @Override
+@Override
+    @Transactional(rollbackFor = Exception.class) 
     public Map<String, Object> importExcel(MultipartFile file) {
         Map<String, Object> resultReport = new HashMap<>();
-        List<String> importErrors = new ArrayList<>();
-        int successCount = 0;
-        int totalRows = 0;
+        List<Map<String, Object>> formattedRowDetails = new ArrayList<>();
+        List<RowMovieImportResult> tempResults = new ArrayList<>();
+        boolean hasAnyError = false;
+
+        // Bộ kiểm tra trùng lặp tên phim chéo giữa các dòng trong nội bộ file Excel
+        Set<String> duplicateTitleChecker = new HashSet<>();
 
         try (InputStream is = file.getInputStream();
              Workbook workbook = new XSSFWorkbook(is)) {
 
             Sheet sheet = workbook.getSheetAt(0);
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("[M/d/yyyy][yyyy-MM-dd]");
-            totalRows = sheet.getLastRowNum();
+            int totalRows = sheet.getLastRowNum();
 
+            // =========================================================
+            // 🎯 BƯỚC 1: VALIDATION PHASE - QUÉT ĐỘC LẬP TOÀN BỘ CÁC DÒNG
+            // =========================================================
             for (int i = 1; i <= totalRows; i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
-                
-                String titleCheck = readString(row.getCell(0));
-                if (titleCheck == null || titleCheck.isBlank()) {
-                    continue; 
-                }
+
+                String title = readString(row.getCell(0));
+                String rawStatus = readString(row.getCell(6));
+                String genreNamesData = readString(row.getCell(8));
+
+                if (title == null || title.isBlank()) continue;
+
+                // FIX: Bỏ đoạn check "if (hasAnyError)" ở đây để ép hệ thống quét sạch lỗi của file
 
                 try {
-                    saveIndividualMovie(row, formatter);
-                    successCount++;
+                    Integer duration = readInt(row.getCell(2));
+
+                    if (duration == null || genreNamesData == null || genreNamesData.isBlank()) {
+                        throw new RuntimeException("Thiếu dữ liệu bắt buộc (Tiêu đề, Thời lượng, Thể loại)");
+                    }
+
+                    // 1. Kiểm tra trùng tên phim dưới DATABASE
+                    if (movieRepository.existsByTitleIgnoreCase(title.trim())) {
+                        throw new RuntimeException("Phim '" + title.trim() + "' đã tồn tại sẵn trong hệ thống");
+                    }
+
+                    // 2. Kiểm tra trùng tên phim trực tiếp trong nội bộ FILE EXCEL
+                    String lowerTitle = title.trim().toLowerCase();
+                    if (duplicateTitleChecker.contains(lowerTitle)) {
+                        throw new RuntimeException("Phim '" + title.trim() + "' bị lặp lại tiêu đề ngay trong tệp Excel này");
+                    }
+                    duplicateTitleChecker.add(lowerTitle);
+
+                    // 3. Kiểm tra danh mục thể loại hệ thống
+                    String[] genreSplit = genreNamesData.split("[,;]");
+                    for (String gName : genreSplit) {
+                        String cleanName = gName.trim();
+                        if (cleanName.isEmpty()) continue;
+                        if (!genreRepository.existsByNameIgnoreCase(cleanName)) {
+                            throw new RuntimeException("Không tìm thấy danh mục thể loại '" + cleanName + "'");
+                        }
+                    }
+
+                    // 4. Kiểm tra chuỗi trạng thái hợp lệ
+                    if (rawStatus != null && !rawStatus.isBlank()) {
+                        String cleanStatus = rawStatus.trim().toLowerCase();
+                        if (!cleanStatus.contains("đang chiếu") && !cleanStatus.contains("sắp chiếu") && 
+                            !cleanStatus.contains("ngừng chiếu") && !cleanStatus.contains("đã chiếu")) {
+                            throw new RuntimeException("Trạng thái '" + rawStatus + "' không hợp lệ (Chỉ chấp nhận: Đang chiếu, Sắp chiếu, Ngừng chiếu)");
+                        }
+                    }
+
+                    // Dòng này HOÀN TOÀN HỢP LỆ tạm thời
+                    tempResults.add(new RowMovieImportResult(i + 1, title, genreNamesData, rawStatus, "SUCCESS", null));
+
                 } catch (Exception rowError) {
-                    importErrors.add("Dòng " + (i + 1) + ": " + rowError.getMessage());
+                    // Dòng này dính lỗi dữ liệu logic -> Đánh dấu FAILED
+                    tempResults.add(new RowMovieImportResult(i + 1, title, genreNamesData, rawStatus, "FAILED", rowError.getMessage()));
+                    hasAnyError = true; // Kích hoạt cờ báo file có biến
                 }
             }
 
+            // Đóng gói dữ liệu báo cáo chi tiết gửi về cho Client (FE)
+            for (RowMovieImportResult res : tempResults) {
+                Map<String, Object> detailMap = new HashMap<>();
+                detailMap.put("rowIndex", res.rowIndex);
+                detailMap.put("title", res.title);
+                detailMap.put("genres", res.genres);
+                detailMap.put("statusStr", res.statusStr);
+                detailMap.put("status", res.status);
+                
+                // FIX: Nếu file dính lỗi, các dòng SUCCESS sẽ được thêm ghi chú hủy để đồng bộ UI
+                if (hasAnyError && "SUCCESS".equals(res.status)) {
+                    detailMap.put("errorMessage", "Bị hủy lưu do có phim khác trong file dính lỗi.");
+                } else {
+                    detailMap.put("errorMessage", res.errorMessage);
+                }
+                
+                formattedRowDetails.add(detailMap);
+            }
+
+            // =========================================================
+            // 🎯 BƯỚC 2: PHÁT HIỆN CÓ LỖI -> CHẶN ĐỨNG, PHẢN HỒI HUY TOÀN BỘ
+            // =========================================================
+            if (hasAnyError) {
+                resultReport.put("isSuccess", false);
+                resultReport.put("rowDetails", formattedRowDetails);
+                return resultReport; // Trả về cấu trúc lỗi, DB sạch sẽ 100% không dính một bản ghi nào
+            }
+
+            // =========================================================
+            // 🎯 BƯỚC 3: FILE 100% SẠCH SẼ -> TIẾN HÀNH ĐẨY DỮ LIỆU XUỐNG DB
+            // =========================================================
+            for (int i = 1; i <= totalRows; i++) {
+                Row row = sheet.getRow(i);
+                if (row == null) continue;
+                String titleCheck = readString(row.getCell(0));
+                if (titleCheck == null || titleCheck.isBlank()) continue;
+
+                saveIndividualMovie(row, formatter);
+            }
+
+            resultReport.put("isSuccess", true);
+            resultReport.put("rowDetails", formattedRowDetails);
+            return resultReport;
+
         } catch (Exception e) {
-            throw new RuntimeException("Không thể đọc tệp Excel: " + e.getMessage());
+            // Đề phòng lỗi phần cứng nghiêm trọng (File hỏng cấu trúc ZIP, mất kết nối ổ đĩa, v.v.)
+            throw new RuntimeException("Import thất bại do lỗi hệ thống: " + e.getMessage(), e);
         }
-
-        resultReport.put("total", totalRows);
-        resultReport.put("successCount", successCount);
-        resultReport.put("errors", importErrors);
-        return resultReport;
     }
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void saveIndividualMovie(Row row, DateTimeFormatter formatter) {
         String title = readString(row.getCell(0));
         String description = readString(row.getCell(1));
@@ -196,7 +301,7 @@ public class MovieServiceImpl implements MovieService {
         String director = readString(row.getCell(3));
         String cast = readString(row.getCell(4));
         String country = readString(row.getCell(5));
-        String status = readString(row.getCell(6));
+        String rawStatus = readString(row.getCell(6)); 
         LocalDate releaseDate = readDate(row.getCell(7), formatter);
         String genreNamesData = readString(row.getCell(8));
         String posterUrl = readString(row.getCell(9));
@@ -226,6 +331,20 @@ public class MovieServiceImpl implements MovieService {
             throw new RuntimeException("Không có thể loại nào hợp lệ");
         }
 
+        String dbStatus = "SHOWING";
+        if (rawStatus != null && !rawStatus.isBlank()) {
+            String cleanStatus = rawStatus.trim().toLowerCase();
+            if (cleanStatus.contains("đang chiếu")) {
+                dbStatus = "SHOWING";
+            } else if (cleanStatus.contains("sắp chiếu")) {
+                dbStatus = "COMING_SOON";
+            } else if (cleanStatus.contains("ngừng chiếu") || cleanStatus.contains("đã chiếu")) {
+                dbStatus = "ENDED";
+            } else {
+                throw new RuntimeException("Trạng thái '" + rawStatus + "' không hợp lệ (Chỉ chấp nhận: Đang chiếu, Sắp chiếu, Ngừng chiếu)");
+            }
+        }
+
         Movie movie = new Movie();
         movie.setTitle(title);
         movie.setDescription(description);
@@ -233,7 +352,7 @@ public class MovieServiceImpl implements MovieService {
         movie.setDirector(director);
         movie.setCast(cast);
         movie.setCountry(country);
-        movie.setStatus(status != null && !status.isBlank() ? status : "SHOWING");
+        movie.setStatus(dbStatus); 
         movie.setReleaseDate(releaseDate);
         movie.setPosterUrl(posterUrl);
         movie.setTrailerUrl(trailerUrl);
@@ -242,10 +361,7 @@ public class MovieServiceImpl implements MovieService {
         movie.setGenres(genres);
         movieRepository.save(movie);
     }
-
-    // =========================================================
-    // 🎯 CONVERT ENTITY -> DTO (FULL OPTION)
-    // =========================================================
+    
     private MovieDTO convertToDTO(Movie movie) {
         MovieDTO dto = new MovieDTO();
         
@@ -265,7 +381,6 @@ public class MovieServiceImpl implements MovieService {
         dto.setCreatedAt(movie.getCreatedAt());
         dto.setUpdatedAt(movie.getUpdatedAt());
 
-        // CHỖ NÀY SẼ LẤY LƯỢT ĐÁNH GIÁ ĐỂ FRONTEND HIỂN THỊ
         Long reviewCount = reviewRepository.countReviewsByMovieId(movie.getId());
         dto.setReviewCount(reviewCount);
 

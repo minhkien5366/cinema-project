@@ -93,7 +93,7 @@ public class ShowtimeServiceImpl implements ShowtimeService {
         }
 
         try (InputStream is = file.getInputStream();
-             Workbook workbook = new XSSFWorkbook(is)) {
+            Workbook workbook = new XSSFWorkbook(is)) {
             Sheet sheet = workbook.getSheetAt(0);
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
             
@@ -112,15 +112,30 @@ public class ShowtimeServiceImpl implements ShowtimeService {
                         throw new RuntimeException("Thời gian bắt đầu suất chiếu không được ở quá khứ");
                     }
                     
-                    Movie movie = movieRepository.findFirstByTitle(movieName)
+                    Movie movie = movieRepository.findFirstByTitleIgnoreCase(movieName)
                             .orElseThrow(() -> new RuntimeException("Không tìm thấy phim: " + movieName));
+                            
                     Room room = roomRepository.findByNameAndCinemaItem_Id(roomName, managedCinemaId)
                             .orElseThrow(() -> new RuntimeException("Không tìm thấy phòng '" + roomName + "' thuộc chi nhánh của bạn"));
                     CinemaItem cinemaItem = room.getCinemaItem();
                     
                     validateBranchAccess(cinemaItem.getId());
                     LocalDateTime endTime = startTime.plusMinutes(movie.getDuration());
+                    
                     checkShowtimeOverlapWithBuffer(room.getId(), startTime, endTime, null);
+                    
+                    boolean isMovieOverlapping = showtimeRepository.findByCinemaItem_Id(managedCinemaId).stream()
+                            .filter(s -> "ACTIVE".equals(s.getStatus()) || "PENDING_CANCEL".equals(s.getStatus()))
+                            .filter(s -> s.getMovie().getId().equals(movie.getId())) // Cùng 1 phim
+                            .anyMatch(s -> {
+                                return startTime.isBefore(s.getEndTime()) && endTime.isAfter(s.getStartTime());
+                            });
+
+                    if (isMovieOverlapping) {
+                        throw new RuntimeException("Phim '" + movie.getTitle() + "' đã có lịch chiếu ở một phòng khác trong khung giờ này (" 
+                                + startTime.format(DateTimeFormatter.ofPattern("HH:mm")) + " - " 
+                                + endTime.format(DateTimeFormatter.ofPattern("HH:mm")) + ")!");
+                    }
                     
                     Showtime showtime = Showtime.builder()
                             .movie(movie)
@@ -139,7 +154,8 @@ public class ShowtimeServiceImpl implements ShowtimeService {
             throw new RuntimeException("Import thất bại: " + e.getMessage());
         }
     }
-   
+
+
     @Override
     @Transactional
     public Showtime createShowtime(ShowtimeRequest request) {
@@ -201,7 +217,7 @@ public class ShowtimeServiceImpl implements ShowtimeService {
     }
 
     // ==========================================
-    // 🔥 ADMIN XÓA: BẮT BUỘC QUA SUPER ADMIN NẾU CÓ >= 1 VÉ
+    // ADMIN XÓA: BẮT BUỘC QUA SUPER ADMIN NẾU CÓ >= 1 VÉ
     // ==========================================
     @Override
     @Transactional
@@ -211,7 +227,6 @@ public class ShowtimeServiceImpl implements ShowtimeService {
 
         long paidCount = ticketRepository.findByShowtimeId(id).stream().filter(t -> "PAID".equals(t.getStatus())).count();
 
-        // Admin chỉ được tự do xóa cái rụp nếu KHÔNG CÓ AI MUA VÉ
         if (paidCount > 0) {
             throw new RuntimeException("Lỗi: Đã có khách THANH TOÁN vé! Vui lòng dùng tính năng 'Gửi xin phép hủy' để Super Admin duyệt.");
         }
@@ -242,7 +257,7 @@ public class ShowtimeServiceImpl implements ShowtimeService {
     }
 
     // ==========================================
-    // 🔥 SUPER ADMIN: DUYỆT / TỪ CHỐI
+    // SUPER ADMIN: DUYỆT / TỪ CHỐI
     // ==========================================
     @Override
     @Transactional
